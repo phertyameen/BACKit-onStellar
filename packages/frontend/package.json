@@ -1,0 +1,17 @@
+{
+  "name": "@backit/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js frontend for BACKit prediction market",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
