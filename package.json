@@ -21,7 +21,8 @@
     "lint": "turbo run lint",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "type-check": "turbo run type-check"
+    "type-check": "turbo run type-check",
+    "ui:dev": "cd packages/frontend && pnpm run dev"
   },
   "devDependencies": {
     "turbo": "^1.13.0",
