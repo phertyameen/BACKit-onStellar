@@ -2,7 +2,11 @@ import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
 import { RelayService } from './relay.service';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
+import { IsString, IsNotEmpty } from 'class-validator';
+
 class RelayTxDto {
+  @IsString()
+  @IsNotEmpty()
   xdr: string;
 }
 
