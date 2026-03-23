@@ -81,7 +81,7 @@ export class RelayService {
     try {
       const response = await this.rpcServer.sendTransaction(finalTx);
       if (response.status === 'ERROR') {
-          this.logger.error(`Transaction failed: ${JSON.stringify(response.errorResultXdr)}`);
+          this.logger.error(`Transaction failed: ${JSON.stringify(response.errorResult)}`);
           throw new BadRequestException('Transaction submission failed');
       }
       return { hash: response.hash };
@@ -105,11 +105,12 @@ export class RelayService {
         throw new BadRequestException(`Operation type ${op.type} not allowed in relay`);
       }
 
-      const invokeOp = op as any; // Cast to access more fields if needed or use XDR
-      // Accessing contract ID in InvokeHostFunction is a bit tricky with high-level SDK
-      // Let's use the XDR representation for a more robust check
+      // Extract the HostFunction from the high-level operation object
+      const hostFunction = (op as any).func as xdr.HostFunction;
       
-      const hostFunction = xdr.Operation.fromXDR(op.toXDR()).body().invokeHostFunctionOp().hostFunction();
+      if (!hostFunction) {
+          throw new BadRequestException('Malformed host function operation');
+      }
       
       if (hostFunction.switch().value !== xdr.HostFunctionType.hostFunctionTypeInvokeContract().value) {
           throw new BadRequestException('Only contract invocations are allowed');
