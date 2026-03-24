@@ -1,7 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, Vec, token};
+use soroban_sdk::{contract, contractimpl, token, Address, Bytes, Env, Vec};
 
+mod admin;
 mod events;
 mod storage;
 mod types;
@@ -38,15 +39,14 @@ impl CallRegistry {
         let config = ContractConfig {
             admin: admin.clone(),
             outcome_manager: outcome_manager.clone(),
+            fee_bps: 0,
         };
 
         set_config(&env, &config);
         extend_storage_ttl(&env);
 
-        env.events().publish(
-            ("call_registry", "initialized"),
-            (admin, outcome_manager),
-        );
+        env.events()
+            .publish(("call_registry", "initialized"), (admin, outcome_manager));
     }
 
     /// Create a new prediction call
@@ -190,7 +190,6 @@ impl CallRegistry {
         /// We rely on events for attribution. The indexer already handles this.
         /// Hence I commented out call.up_stakes.set(...) and call.down_stakes.set(...)
         /// uncomment in the future if rule changes
-
         // Update stakes
         match stake_position {
             StakePosition::Up => {
@@ -348,6 +347,7 @@ impl CallRegistry {
     /// # Arguments
     /// * `new_admin` - New admin address
     pub fn set_admin(env: Env, new_admin: Address) {
+        admin::set_admin(env, new_admin);
         let mut config = match get_config(&env) {
             Some(c) => c,
             None => panic!("Contract not initialized"),
@@ -370,6 +370,7 @@ impl CallRegistry {
     /// # Arguments
     /// * `new_manager` - New outcome manager address
     pub fn set_outcome_manager(env: Env, new_manager: Address) {
+        admin::set_outcome_manager(env, new_manager);
         let config = match get_config(&env) {
             Some(c) => c,
             None => panic!("Contract not initialized"),
@@ -386,6 +387,10 @@ impl CallRegistry {
         extend_storage_ttl(&env);
 
         emit_outcome_manager_changed(&env, &old_manager, &new_manager);
+    }
+
+    pub fn set_fee(env: Env, new_fee_bps: u32) {
+        admin::set_fee(env, new_fee_bps);
     }
 
     /// Get current contract configuration
@@ -426,33 +431,27 @@ impl CallRegistry {
         }
     }
 
-    pub fn release_escrow(
-    env: Env,
-    call_id: u64,
-    to: Address,
-    amount: i128,
-) {
-    let config = get_config(&env).expect("Not initialized");
-    config.outcome_manager.require_auth();
+    pub fn release_escrow(env: Env, call_id: u64, to: Address, amount: i128) {
+        let config = get_config(&env).expect("Not initialized");
+        config.outcome_manager.require_auth();
 
-    let call = get_call(&env, call_id).expect("Call not found");
+        let call = get_call(&env, call_id).expect("Call not found");
 
-    let token_client = token::Client::new(&env, &call.stake_token);
-    token_client.transfer(&env.current_contract_address(), &to, &amount);
-}
-
-
-    pub fn mark_settled(env: Env, call_id: u64) {
-    let config = get_config(&env).expect("Not initialized");
-    config.outcome_manager.require_auth();
-
-    let mut call = get_call(&env, call_id).expect("Call not found");
-
-    if call.settled {
-        panic!("Already settled");
+        let token_client = token::Client::new(&env, &call.stake_token);
+        token_client.transfer(&env.current_contract_address(), &to, &amount);
     }
 
-    call.settled = true;
-    set_call(&env, &call);
-}
+    pub fn mark_settled(env: Env, call_id: u64) {
+        let config = get_config(&env).expect("Not initialized");
+        config.outcome_manager.require_auth();
+
+        let mut call = get_call(&env, call_id).expect("Call not found");
+
+        if call.settled {
+            panic!("Already settled");
+        }
+
+        call.settled = true;
+        set_call(&env, &call);
+    }
 }

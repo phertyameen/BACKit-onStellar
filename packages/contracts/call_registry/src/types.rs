@@ -75,6 +75,8 @@ pub struct ContractConfig {
     pub admin: Address,
     /// Address that can submit call outcomes
     pub outcome_manager: Address,
+    /// Protocol fee in basis points (e.g. 100 = 1%). Default: 0.
+    pub fee_bps: u32,
 }
 
 /// Statistics for a call
