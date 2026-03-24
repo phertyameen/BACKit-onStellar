@@ -6,6 +6,7 @@ import {
     Index,
 } from 'typeorm';
 import { NotificationType } from './notification-type.enum';
+import { DispatchType } from './dispatch-type.enum';
 
 @Entity('notifications')
 export class NotificationEntity {
@@ -28,6 +29,20 @@ export class NotificationEntity {
     @Column({ type: 'boolean', default: false })
     @Index()
     readStatus: boolean;
+
+    @Column({ type: 'boolean', default: false })
+    @Index()
+    isDispatched: boolean;
+
+    @Column({
+        type: 'enum',
+        enum: DispatchType,
+        default: DispatchType.NONE,
+    })
+    dispatchType: DispatchType;
+
+    @Column({ type: 'text', nullable: true })
+    dispatchError?: string | null;
 
     @CreateDateColumn()
     @Index()

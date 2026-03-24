@@ -2,6 +2,7 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { CallsModule } from './calls/calls.module';
 import { HealthModule } from './health/health.module';
 import { OracleModule } from './oracle/oracle.module';
@@ -36,6 +37,7 @@ import { RelayModule } from './relay/relay.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST || process.env.POSTGRES_HOST || 'localhost',
