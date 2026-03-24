@@ -5,9 +5,11 @@ import { useWalletContext } from "./WalletContext";
 import { ConnectButton } from "./ConnectButton";
 import { NotificationBell } from "./NotificationBell";
 import { TrendingUp } from "lucide-react";
+import { usePlatformConfig } from "@/contexts/PlatformConfigContext";
 
 export function NavBar() {
     const { publicKey } = useWalletContext();
+    const { config } = usePlatformConfig();
 
     return (
         <nav
@@ -32,6 +34,9 @@ export function NavBar() {
             </div>
 
             <div className="flex items-center gap-4">
+                {config && (
+                    <div className="text-sm text-gray-300 mr-4">Fee: {config.feePercent}%</div>
+                )}
                 {publicKey && <NotificationBell userId={publicKey} />}
                 <ConnectButton />
             </div>

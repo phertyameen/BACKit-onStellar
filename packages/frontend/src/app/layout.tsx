@@ -1,6 +1,7 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
 import { WalletProvider } from "@/components/WalletContext";
+import { PlatformConfigProvider } from "@/contexts/PlatformConfigContext";
 import { NavBar } from "@/components/NavBar";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -24,8 +25,10 @@ export default function RootLayout({
           the live wallet address and passes it to NotificationBell.
         */}
         <WalletProvider>
-          <NavBar />
-          <main>{children}</main>
+          <PlatformConfigProvider>
+            <NavBar />
+            <main>{children}</main>
+          </PlatformConfigProvider>
         </WalletProvider>
       </body>
     </html>
