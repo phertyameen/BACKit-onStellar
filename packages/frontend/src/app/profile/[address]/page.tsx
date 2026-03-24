@@ -1,204 +1,502 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
-import { User, UserProfile } from '@/types'
-import ProfileHeader from '@/components/ProfileHeader'
-import ProfileStats from '@/components/ProfileStats'
-import ProfileTabs from '@/components/ProfileTabs'
+import Link from 'next/link'
+import { StakeLedgerItem, UserStakesResponse } from '@/types'
 
-export default function ProfilePage() {
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 20
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function PositionTag({ position }: { position: 'YES' | 'NO' }) {
+  return position === 'YES' ? (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+      </svg>
+      UP
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+      </svg>
+      DOWN
+    </span>
+  )
+}
+
+function StatusTag({ status, position, callOutcome }: {
+  status: 'PENDING' | 'RESOLVED'
+  position: 'YES' | 'NO'
+  callOutcome?: 'YES' | 'NO' | 'PENDING'
+}) {
+  if (status === 'PENDING') {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+        Pending
+      </span>
+    )
+  }
+
+  const won = callOutcome === position
+  return won ? (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      </svg>
+      Won
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+      Lost
+    </span>
+  )
+}
+
+function ProfitLossCell({ profitLoss }: { profitLoss?: number | null }) {
+  if (profitLoss == null) {
+    return <span className="text-gray-400 text-sm">—</span>
+  }
+  const positive = profitLoss >= 0
+  return (
+    <span className={`text-sm font-semibold ${positive ? 'text-emerald-600' : 'text-rose-600'}`}>
+      {positive ? '+' : ''}{profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XLM
+    </span>
+  )
+}
+
+function StakeRow({ stake }: { stake: StakeLedgerItem }) {
+  const callOutcome = stake.call?.outcome as 'YES' | 'NO' | 'PENDING' | undefined
+
+  return (
+    <tr className="group border-b border-gray-100 hover:bg-gray-50/70 transition-colors duration-150">
+      {/* Call description */}
+      <td className="py-3.5 pl-4 pr-3 sm:pl-6">
+        <div className="flex flex-col gap-0.5">
+          {stake.call ? (
+            <Link
+              href={`/calls/${stake.callId}`}
+              className="text-sm font-medium text-gray-900 hover:text-indigo-600 transition-colors line-clamp-2 leading-snug"
+            >
+              {stake.call.description}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium text-gray-900 font-mono">
+              {stake.callId}
+            </span>
+          )}
+          <span className="text-xs text-gray-400">
+            {new Date(stake.createdAt).toLocaleDateString(undefined, {
+              year: 'numeric', month: 'short', day: 'numeric',
+            })}
+          </span>
+        </div>
+      </td>
+
+      {/* Position */}
+      <td className="py-3.5 px-3 whitespace-nowrap">
+        <PositionTag position={stake.position} />
+      </td>
+
+      {/* Amount */}
+      <td className="py-3.5 px-3 whitespace-nowrap">
+        <span className="text-sm font-semibold text-gray-900 tabular-nums">
+          {stake.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span className="text-xs font-normal text-gray-400 ml-1">XLM</span>
+        </span>
+      </td>
+
+      {/* P&L */}
+      <td className="py-3.5 px-3 whitespace-nowrap">
+        <ProfitLossCell profitLoss={stake.profitLoss} />
+      </td>
+
+      {/* Status */}
+      <td className="py-3.5 px-3 whitespace-nowrap">
+        <StatusTag
+          status={stake.resolutionStatus}
+          position={stake.position}
+          callOutcome={callOutcome}
+        />
+      </td>
+
+      {/* Tx hash */}
+      <td className="py-3.5 pl-3 pr-4 sm:pr-6 whitespace-nowrap text-right">
+        {stake.transactionHash ? (
+          <a
+            href={`https://stellar.expert/explorer/public/tx/${stake.transactionHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-gray-400 hover:text-indigo-500 font-mono transition-colors"
+            title={stake.transactionHash}
+          >
+            {stake.transactionHash.slice(0, 6)}…{stake.transactionHash.slice(-4)}
+          </a>
+        ) : (
+          <span className="text-gray-300 text-xs">—</span>
+        )}
+      </td>
+    </tr>
+  )
+}
+
+function StakeRowSkeleton() {
+  return (
+    <tr className="border-b border-gray-100 animate-pulse">
+      <td className="py-3.5 pl-4 pr-3 sm:pl-6">
+        <div className="h-4 bg-gray-200 rounded w-3/4 mb-1.5" />
+        <div className="h-3 bg-gray-100 rounded w-1/3" />
+      </td>
+      <td className="py-3.5 px-3"><div className="h-5 bg-gray-200 rounded-full w-14" /></td>
+      <td className="py-3.5 px-3"><div className="h-4 bg-gray-200 rounded w-20" /></td>
+      <td className="py-3.5 px-3"><div className="h-4 bg-gray-200 rounded w-16" /></td>
+      <td className="py-3.5 px-3"><div className="h-5 bg-gray-200 rounded-full w-16" /></td>
+      <td className="py-3.5 pl-3 pr-4 sm:pr-6"><div className="h-3 bg-gray-200 rounded w-14 ml-auto" /></td>
+    </tr>
+  )
+}
+
+function EmptyState() {
+  return (
+    <div className="py-16 text-center">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
+        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      </div>
+      <p className="text-sm font-medium text-gray-900">No stakes yet</p>
+      <p className="text-sm text-gray-500 mt-1">Stakes you place on calls will appear here.</p>
+    </div>
+  )
+}
+
+function Pagination({
+  page,
+  total,
+  limit,
+  onPageChange,
+}: {
+  page: number
+  total: number
+  limit: number
+  onPageChange: (p: number) => void
+}) {
+  const totalPages = Math.ceil(total / limit)
+  if (totalPages <= 1) return null
+
+  const from = (page - 1) * limit + 1
+  const to = Math.min(page * limit, total)
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 sm:px-6 border-t border-gray-100">
+      <p className="text-sm text-gray-500">
+        Showing <span className="font-medium text-gray-700">{from}–{to}</span> of{' '}
+        <span className="font-medium text-gray-700">{total}</span> stakes
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(page - 1)}
+          disabled={page === 1}
+          className="relative inline-flex items-center px-2.5 py-1.5 text-sm font-medium text-gray-500 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+          const p = i + Math.max(1, Math.min(page - 3, totalPages - 6))
+          return (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              className={`relative inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ${
+                p === page
+                  ? 'bg-indigo-600 border-indigo-600 text-white'
+                  : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {p}
+            </button>
+          )
+        })}
+        <button
+          onClick={() => onPageChange(page + 1)}
+          disabled={page === totalPages}
+          className="relative inline-flex items-center px-2.5 py-1.5 text-sm font-medium text-gray-500 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Filter bar ───────────────────────────────────────────────────────────────
+
+type StatusFilter = 'ALL' | 'PENDING' | 'RESOLVED'
+type PositionFilter = 'ALL' | 'YES' | 'NO'
+
+function FilterBar({
+  status,
+  position,
+  onStatusChange,
+  onPositionChange,
+}: {
+  status: StatusFilter
+  position: PositionFilter
+  onStatusChange: (s: StatusFilter) => void
+  onPositionChange: (p: PositionFilter) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6 border-b border-gray-100 bg-gray-50/50">
+      {/* Status filter */}
+      <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-0.5">
+        {(['ALL', 'PENDING', 'RESOLVED'] as StatusFilter[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => onStatusChange(s)}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              status === s
+                ? 'bg-gray-900 text-white'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Position filter */}
+      <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-0.5">
+        {(['ALL', 'YES', 'NO'] as PositionFilter[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => onPositionChange(p)}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              position === p
+                ? p === 'YES'
+                  ? 'bg-emerald-600 text-white'
+                  : p === 'NO'
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-gray-900 text-white'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {p === 'ALL' ? 'All Sides' : p === 'YES' ? '↑ UP' : '↓ DOWN'}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function StakesPage() {
   const params = useParams()
   const address = params.address as string
-  
-  const [profile, setProfile] = useState<UserProfile | null>(null)
+
+  const [stakes, setStakes] = useState<StakeLedgerItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isOwnProfile, setIsOwnProfile] = useState(false)
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        setLoading(true)
-        setError(null)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
+  const [positionFilter, setPositionFilter] = useState<PositionFilter>('ALL')
 
-        const response = await fetch(`/api/users/${address}`)
-        
-        if (!response.ok) {
-          if (response.status === 404) {
-            setError('User not found')
-          } else {
-            setError('Failed to load profile')
-          }
-          return
-        }
+  const fetchStakes = useCallback(async (p: number) => {
+    if (!address) return
+    try {
+      setLoading(true)
+      setError(null)
 
-        const data: UserProfile = await response.json()
-        setProfile(data)
-        
-        setIsOwnProfile(false)
-      } catch (err) {
-        console.error('Error fetching profile:', err)
-        setError('Failed to load profile')
-      } finally {
-        setLoading(false)
+      const params = new URLSearchParams({
+        page: String(p),
+        limit: String(PAGE_SIZE),
+      })
+
+      const res = await fetch(`/api/users/${address}/stakes?${params}`)
+
+      if (!res.ok) {
+        setError(res.status === 404 ? 'User not found' : 'Failed to load stakes')
+        return
       }
-    }
 
-    if (address) {
-      fetchProfile()
+      const data: UserStakesResponse = await res.json()
+      setStakes(data.data)
+      setTotal(data.total)
+    } catch {
+      setError('Failed to load stakes')
+    } finally {
+      setLoading(false)
     }
   }, [address])
 
-  const handleFollow = async () => {
-    if (!profile) return
-    
-    try {
-      setProfile((prev: UserProfile | null) => prev ? {
-        ...prev,
-        user: {
-          ...prev.user,
-          isFollowing: true,
-          followers: prev.user.followers + 1
-        }
-      } : null)
+  useEffect(() => {
+    fetchStakes(page)
+  }, [fetchStakes, page])
 
-      const response = await fetch(`/api/users/${address}/follow`, {
-        method: 'POST',
-      })
+  // Client-side filter on top of the fetched page
+  const filtered = stakes.filter((s) => {
+    const statusMatch =
+      statusFilter === 'ALL' ||
+      (statusFilter === 'PENDING' && s.resolutionStatus === 'PENDING') ||
+      (statusFilter === 'RESOLVED' && s.resolutionStatus === 'RESOLVED')
 
-      if (!response.ok) {
-        throw new Error('Failed to follow user')
-      }
-    } catch (err) {
-      console.error('Error following user:', err)
-      setProfile((prev: UserProfile | null) => prev ? {
-        ...prev,
-        user: {
-          ...prev.user,
-          isFollowing: false,
-          followers: prev.user.followers - 1
-        }
-      } : null)
-    }
+    const positionMatch =
+      positionFilter === 'ALL' || s.position === positionFilter
+
+    return statusMatch && positionMatch
+  })
+
+  const handlePageChange = (p: number) => {
+    setPage(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleUnfollow = async () => {
-    if (!profile) return
-    
-    try {
-      setProfile((prev: UserProfile | null) => prev ? {
-        ...prev,
-        user: {
-          ...prev.user,
-          isFollowing: false,
-          followers: prev.user.followers - 1
-        }
-      } : null)
-
-      const response = await fetch(`/api/users/${address}/unfollow`, {
-        method: 'POST',
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to unfollow user')
-      }
-    } catch (err) {
-      console.error('Error unfollowing user:', err)
-      setProfile((prev: UserProfile | null) => prev ? {
-        ...prev,
-        user: {
-          ...prev.user,
-          isFollowing: true,
-          followers: prev.user.followers + 1
-        }
-      } : null)
-    }
+  const handleStatusChange = (s: StatusFilter) => {
+    setStatusFilter(s)
+    setPage(1)
   }
 
-  const handleEditProfile = () => {
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 py-8">
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="animate-pulse">
-            <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 mb-6">
-              <div className="h-8 bg-gray-200 rounded w-1/3 mb-4"></div>
-              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="bg-white rounded-lg shadow-md border border-gray-200 p-4">
-                  <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-                  <div className="h-6 bg-gray-200 rounded w-3/4"></div>
-                </div>
-              ))}
-            </div>
-            <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
-              <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="border border-gray-200 rounded-lg p-4">
-                    <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 py-8">
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="bg-white rounded-lg shadow-md border border-gray-200 p-8 text-center">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Profile Not Found</h1>
-            <p className="text-gray-600 mb-4">
-              {error === 'User not found' 
-                ? `The user with address ${address} was not found.`
-                : 'An error occurred while loading this profile.'
-              }
-            </p>
-            <button 
-              onClick={() => window.history.back()}
-              className="btn-primary"
-            >
-              Go Back
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!profile) {
-    return null
+  const handlePositionChange = (p: PositionFilter) => {
+    setPositionFilter(p)
+    setPage(1)
   }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4 space-y-6">
-        <ProfileHeader
-          user={profile.user}
-          isOwnProfile={isOwnProfile}
-          onFollow={handleFollow}
-          onUnfollow={handleUnfollow}
-          onEditProfile={handleEditProfile}
-        />
-        
-        <ProfileStats user={profile.user} />
-        
-        <ProfileTabs
-          createdCalls={profile.createdCalls}
-          participatedCalls={profile.participatedCalls}
-          resolvedCalls={profile.resolvedCalls}
-        />
+
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-gray-500">
+          <Link href={`/profile/${address}`} className="hover:text-gray-700 transition-colors">
+            Profile
+          </Link>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="text-gray-900 font-medium">My Stakes</span>
+        </nav>
+
+        {/* Main card */}
+        <div className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-4 sm:px-6 border-b border-gray-100">
+            <div>
+              <h1 className="text-lg font-semibold text-gray-900">My Stakes</h1>
+              {!loading && !error && (
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {total} stake{total !== 1 ? 's' : ''} total
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => fetchStakes(page)}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Refresh"
+            >
+              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+          </div>
+
+          {/* Filter bar */}
+          <FilterBar
+            status={statusFilter}
+            position={positionFilter}
+            onStatusChange={handleStatusChange}
+            onPositionChange={handlePositionChange}
+          />
+
+          {/* Error state */}
+          {error && (
+            <div className="py-12 text-center">
+              <p className="text-sm text-rose-600 font-medium">{error}</p>
+              <button
+                onClick={() => fetchStakes(page)}
+                className="mt-3 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {/* Table */}
+          {!error && (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-100">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="py-3 pl-4 pr-3 sm:pl-6 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Call
+                      </th>
+                      <th scope="col" className="py-3 px-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Side
+                      </th>
+                      <th scope="col" className="py-3 px-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th scope="col" className="py-3 px-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        P&amp;L
+                      </th>
+                      <th scope="col" className="py-3 px-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th scope="col" className="py-3 pl-3 pr-4 sm:pr-6 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Tx
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 bg-white">
+                    {loading
+                      ? Array.from({ length: PAGE_SIZE }).map((_, i) => <StakeRowSkeleton key={i} />)
+                      : filtered.length === 0
+                      ? (
+                        <tr>
+                          <td colSpan={6}>
+                            <EmptyState />
+                          </td>
+                        </tr>
+                      )
+                      : filtered.map((stake) => (
+                          <StakeRow key={stake.id} stake={stake} />
+                        ))
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {!loading && (
+                <Pagination
+                  page={page}
+                  total={total}
+                  limit={PAGE_SIZE}
+                  onPageChange={handlePageChange}
+                />
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
