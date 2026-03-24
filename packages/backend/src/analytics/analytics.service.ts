@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { TotalValueLockedResponseDto } from './dto/tvl.dto';
+import { Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -27,10 +28,12 @@ export class AnalyticsService {
     private readonly callRepository: Repository<Call>,
     @InjectRepository(Stake)
     private readonly stakeRepository: Repository<Stake>,
+    @InjectRepository(Stake)
+    private readonly stakeLedgerRepository: Repository<Stake>,
 
     private readonly dataSource: DataSource,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) { }
+  ) {}
 
   /**
    * Get a paginated ledger of a user's stakes joined with call info.
@@ -429,5 +432,33 @@ export class AnalyticsService {
     const reputation = winRate * 0.7 + normalizedVolume * 0.3;
 
     return Number(reputation.toFixed(4));
+  }
+
+  /**
+   * Aggregates a user's active Portfolio "Total Value Locked".
+   *
+   * Loops over every StakeLedger row where:
+   *   - userAddress matches the caller
+   *   - the parent Call still has outcome === 'PENDING'  (i.e. unresolved)
+   *
+   * Returns the XLM sum of those amounts and a count of matching rows.
+   */
+  async getTotalValueLocked(
+    userAddress: string,
+  ): Promise<TotalValueLockedResponseDto> {
+    const result = await this.stakeLedgerRepository
+      .createQueryBuilder('stake')
+      .innerJoin('stake.call', 'call')
+      .where('stake.userAddress = :userAddress', { userAddress })
+      .andWhere('call.outcome = :outcome', { outcome: 'PENDING' })
+      .select('COALESCE(SUM(stake.amount), 0)', 'totalValueLocked')
+      .addSelect('COUNT(stake.id)', 'pendingStakesCount')
+      .getRawOne<{ totalValueLocked: string; pendingStakesCount: string }>();
+
+    return {
+      userAddress,
+      totalValueLocked: parseFloat(result?.totalValueLocked ?? '0'),
+      pendingStakesCount: parseInt(result?.pendingStakesCount ?? '0', 10),
+    };
   }
 }
