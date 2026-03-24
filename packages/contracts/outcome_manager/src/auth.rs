@@ -1,5 +1,5 @@
-use soroban_sdk::{Env, Address};
 use crate::storage::InstanceKey;
+use soroban_sdk::{Address, Env};
 
 pub fn require_admin(env: &Env) -> Address {
     let admin: Address = env

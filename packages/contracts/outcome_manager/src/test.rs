@@ -3,11 +3,11 @@
 use soroban_sdk::{
     contract, contractimpl,
     testutils::{Address as _, Ledger},
-    Address, Bytes, BytesN, Env, Vec, Symbol,
+    Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
-use crate::{OutcomeManager, OutcomeManagerClient};
 use crate::storage::{Outcome, SignedOutcome};
+use crate::{OutcomeManager, OutcomeManagerClient};
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ fn gen_keypair(env: &Env) -> (BytesN<32>, BytesN<32>) {
     // Use a random seed for testing
     let mut seed = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut seed);
-    
+
     let signing_key = SigningKey::from_bytes(&seed);
     let public_key = signing_key.verifying_key();
 
@@ -50,10 +50,10 @@ fn sign_outcome(
     timestamp: u64,
 ) -> BytesN<64> {
     use crate::verification::build_message;
-    use ed25519_dalek::{SigningKey, Signer};
+    use ed25519_dalek::{Signer, SigningKey};
 
     let msg = build_message(env, call_id, outcome, price, timestamp);
-    
+
     // Convert soroban Bytes to fixed-size array for signing
     let mut msg_bytes = [0u8; 128];
     let msg_len = msg.len() as usize;
@@ -66,7 +66,15 @@ fn sign_outcome(
 }
 
 /// Register and initialize an OutcomeManager with a single oracle / quorum=1
-fn setup_single_oracle(env: &Env) -> (Address, Address, BytesN<32>, BytesN<32>, OutcomeManagerClient) {
+fn setup_single_oracle(
+    env: &Env,
+) -> (
+    Address,
+    Address,
+    BytesN<32>,
+    BytesN<32>,
+    OutcomeManagerClient,
+) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let (oracle_secret, oracle_pubkey) = gen_keypair(env);

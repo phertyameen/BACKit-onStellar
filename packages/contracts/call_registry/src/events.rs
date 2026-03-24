@@ -1,4 +1,6 @@
-use soroban_sdk::{Address, Bytes, Env};
+use soroban_sdk::{Address, Bytes, Env, Symbol};
+
+// ── Existing events (unchanged) ───────────────────────────────────────────────
 
 /// Emitted when a new call is created
 pub fn emit_call_created(
@@ -49,18 +51,53 @@ pub fn emit_call_settled(env: &Env, call_id: u64, winner_count: u64) {
         .publish(("call_registry", "call_settled"), (call_id, winner_count));
 }
 
-/// Emitted when admin changes
-pub fn emit_admin_changed(env: &Env, old_admin: &Address, new_admin: &Address) {
+// ── Admin param events ────────────────────────────────────────────────────────
+
+/// Discriminant passed as the `param` field so the indexer can tell which
+/// field changed without decoding the full payload.
+pub const PARAM_ADMIN: &str = "admin";
+pub const PARAM_OUTCOME_MANAGER: &str = "outcome_manager";
+pub const PARAM_FEE_BPS: &str = "fee_bps";
+
+/// Unified event emitted whenever **any** admin-controlled parameter changes.
+///
+/// Topic  : `("call_registry", "admin_params_changed")`
+/// Payload: `(param: Symbol, changed_by: Address, old_value: Val, new_value: Val)`
+///
+/// The indexer subscribes to a single topic and uses `param` to route
+/// each mutation to the correct handler.
+pub fn emit_admin_params_changed_address(
+    env: &Env,
+    param: &str,
+    changed_by: &Address,
+    old_value: &Address,
+    new_value: &Address,
+) {
     env.events().publish(
-        ("call_registry", "admin_changed"),
-        (old_admin.clone(), new_admin.clone()),
+        ("call_registry", "admin_params_changed"),
+        (
+            Symbol::new(env, param),
+            changed_by.clone(),
+            old_value.clone(),
+            new_value.clone(),
+        ),
     );
 }
 
-/// Emitted when outcome manager changes
-pub fn emit_outcome_manager_changed(env: &Env, old_manager: &Address, new_manager: &Address) {
+pub fn emit_admin_params_changed_u32(
+    env: &Env,
+    param: &str,
+    changed_by: &Address,
+    old_value: u32,
+    new_value: u32,
+) {
     env.events().publish(
-        ("call_registry", "outcome_manager_changed"),
-        (old_manager.clone(), new_manager.clone()),
+        ("call_registry", "admin_params_changed"),
+        (
+            Symbol::new(env, param),
+            changed_by.clone(),
+            old_value,
+            new_value,
+        ),
     );
 }

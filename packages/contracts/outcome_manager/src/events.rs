@@ -1,7 +1,12 @@
-use soroban_sdk::{Env, symbol_short};
+use soroban_sdk::{symbol_short, Env};
 
 /// Emitted when a new oracle outcome report is accepted (before quorum)
-pub fn emit_outcome_submitted(env: &Env, call_id: u64, oracle: &soroban_sdk::BytesN<32>, outcome: u32) {
+pub fn emit_outcome_submitted(
+    env: &Env,
+    call_id: u64,
+    oracle: &soroban_sdk::BytesN<32>,
+    outcome: u32,
+) {
     env.events().publish(
         (symbol_short!("outcome"), symbol_short!("submitted")),
         (call_id, oracle.clone(), outcome),

@@ -1,10 +1,145 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::*, Address, Bytes, Env, String as SorobanString};
+use soroban_sdk::{testutils::Events, Vec, Address, Env, IntoVal, Symbol, Bytes, String as SorobanString};
 
 mod call_registry {
     use super::*;
     use crate::{CallRegistry, CallRegistryClient};
+
+    fn setup() -> (Env, CallRegistryClient<'static>, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+ 
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+ 
+    let admin = Address::generate(&env);
+    let outcome_manager = Address::generate(&env);
+ 
+    client.initialize(&admin, &outcome_manager);
+ 
+    (env, client, admin, outcome_manager)
+}
+ 
+// ── set_admin ─────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_set_admin_updates_config() {
+    let (env, client, _admin, _om) = setup();
+    let new_admin = Address::generate(&env);
+ 
+    client.set_admin(&new_admin);
+ 
+    assert_eq!(client.get_config().admin, new_admin);
+}
+ 
+#[test]
+fn test_set_admin_emits_admin_params_changed() {
+    let (env, client, old_admin, _om) = setup();
+    let new_admin = Address::generate(&env);
+ 
+    client.set_admin(&new_admin);
+ 
+    let events = env.events().all();
+    let last = events.last().expect("no events");
+ 
+    // Topic: ("call_registry", "admin_params_changed")
+    assert_eq!(
+        last.0,
+        vec![
+            &env,
+            "call_registry".into_val(&env),
+            "admin_params_changed".into_val(&env),
+        ]
+    );
+ 
+    // First element of the payload tuple is the param discriminant
+    let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
+        last.1.into_val(&env);
+ 
+    assert_eq!(param, Symbol::new(&env, "admin"));
+    assert_eq!(old_val, old_admin);
+    assert_eq!(new_val, new_admin);
+}
+ 
+// ── set_outcome_manager ───────────────────────────────────────────────────────
+ 
+#[test]
+fn test_set_outcome_manager_updates_config() {
+    let (env, client, _admin, _om) = setup();
+    let new_om = Address::generate(&env);
+ 
+    client.set_outcome_manager(&new_om);
+ 
+    assert_eq!(client.get_config().outcome_manager, new_om);
+}
+ 
+#[test]
+fn test_set_outcome_manager_emits_admin_params_changed() {
+    let (env, client, _admin, old_om) = setup();
+    let new_om = Address::generate(&env);
+ 
+    client.set_outcome_manager(&new_om);
+ 
+    let events = env.events().all();
+    let last = events.last().expect("no events");
+ 
+    let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
+        last.1.into_val(&env);
+ 
+    assert_eq!(param, Symbol::new(&env, "outcome_manager"));
+    assert_eq!(old_val, old_om);
+    assert_eq!(new_val, new_om);
+}
+ 
+// ── set_fee ───────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_set_fee_updates_config() {
+    let (_env, client, _admin, _om) = setup();
+ 
+    client.set_fee(&250_u32); // 2.5 %
+ 
+    assert_eq!(client.get_config().fee_bps, 250);
+}
+ 
+#[test]
+fn test_set_fee_emits_admin_params_changed() {
+    let (env, client, _admin, _om) = setup();
+ 
+    client.set_fee(&100_u32);
+ 
+    let events = env.events().all();
+    let last = events.last().expect("no events");
+ 
+    let (param, _changed_by, old_val, new_val): (Symbol, Address, u32, u32) =
+        last.1.into_val(&env);
+ 
+    assert_eq!(param, Symbol::new(&env, "fee_bps"));
+    assert_eq!(old_val, 0_u32);   // default set in initialize()
+    assert_eq!(new_val, 100_u32);
+}
+ 
+#[test]
+fn test_set_fee_zero_is_valid() {
+    let (_env, client, _admin, _om) = setup();
+    client.set_fee(&0_u32);
+    assert_eq!(client.get_config().fee_bps, 0);
+}
+ 
+#[test]
+fn test_set_fee_max_boundary_is_valid() {
+    let (_env, client, _admin, _om) = setup();
+    client.set_fee(&10_000_u32); // exactly 100 % — allowed
+    assert_eq!(client.get_config().fee_bps, 10_000);
+}
+ 
+#[test]
+#[should_panic(expected = "fee_bps cannot exceed 10_000 (100%)")]
+fn test_set_fee_above_max_panics() {
+    let (_env, client, _admin, _om) = setup();
+    client.set_fee(&10_001_u32);
+}
 
     fn create_test_env() -> (Env, Address, Address, Address) {
         let env = Env::default();

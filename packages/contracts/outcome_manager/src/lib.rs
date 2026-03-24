@@ -3,11 +3,11 @@
 mod auth;
 mod events;
 mod storage;
-mod verification;
 mod test;
+mod verification;
 
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, BytesN, Env, IntoVal, Map, Vec, Symbol,
+    contract, contractimpl, symbol_short, Address, BytesN, Env, IntoVal, Map, Symbol, Vec,
 };
 
 use auth::require_admin;
@@ -18,13 +18,25 @@ use verification::{build_message, verify_signature};
 // ─── Cross-contract helpers ────────────────────────────────────────────────────
 
 /// Call `resolve_call(call_id, outcome, end_price)` on the CallRegistry.
-fn registry_resolve_call(env: &Env, registry: &Address, call_id: u64, outcome: u32, end_price: i128) {
+fn registry_resolve_call(
+    env: &Env,
+    registry: &Address,
+    call_id: u64,
+    outcome: u32,
+    end_price: i128,
+) {
     let args = (call_id, outcome, end_price).into_val(env);
     env.invoke_contract::<()>(registry, &Symbol::new(env, "resolve_call"), args);
 }
 
 /// Call `release_escrow(call_id, to, amount)` on the CallRegistry.
-fn registry_release_escrow(env: &Env, registry: &Address, call_id: u64, to: &Address, amount: i128) {
+fn registry_release_escrow(
+    env: &Env,
+    registry: &Address,
+    call_id: u64,
+    to: &Address,
+    amount: i128,
+) {
     let args = (call_id, to.clone(), amount).into_val(env);
     env.invoke_contract::<()>(registry, &Symbol::new(env, "release_escrow"), args);
 }
@@ -52,12 +64,7 @@ impl OutcomeManager {
     ///
     /// # Panics
     /// If called more than once (`already initialized`).
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        oracles: Vec<BytesN<32>>,
-        quorum: u32,
-    ) {
+    pub fn initialize(env: Env, admin: Address, oracles: Vec<BytesN<32>>, quorum: u32) {
         if env.storage().instance().has(&InstanceKey::Admin) {
             panic!("already initialized");
         }
@@ -74,7 +81,9 @@ impl OutcomeManager {
         }
 
         env.storage().instance().set(&InstanceKey::Admin, &admin);
-        env.storage().instance().set(&InstanceKey::Oracles, &oracle_map);
+        env.storage()
+            .instance()
+            .set(&InstanceKey::Oracles, &oracle_map);
         env.storage().instance().set(&InstanceKey::Quorum, &quorum);
     }
 
@@ -85,7 +94,9 @@ impl OutcomeManager {
         let mut oracles: Map<BytesN<32>, bool> =
             env.storage().instance().get(&InstanceKey::Oracles).unwrap();
         oracles.set(oracle, true);
-        env.storage().instance().set(&InstanceKey::Oracles, &oracles);
+        env.storage()
+            .instance()
+            .set(&InstanceKey::Oracles, &oracles);
     }
 
     pub fn remove_oracle(env: Env, oracle: BytesN<32>) {
@@ -93,7 +104,9 @@ impl OutcomeManager {
         let mut oracles: Map<BytesN<32>, bool> =
             env.storage().instance().get(&InstanceKey::Oracles).unwrap();
         oracles.remove(oracle);
-        env.storage().instance().set(&InstanceKey::Oracles, &oracles);
+        env.storage()
+            .instance()
+            .set(&InstanceKey::Oracles, &oracles);
     }
 
     pub fn set_quorum(env: Env, quorum: u32) {
@@ -108,7 +121,9 @@ impl OutcomeManager {
 
     pub fn set_admin(env: Env, new_admin: Address) {
         require_admin(&env);
-        env.storage().instance().set(&InstanceKey::Admin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&InstanceKey::Admin, &new_admin);
     }
 
     // ── Oracle Submission ──────────────────────────────────────────────────────
@@ -134,7 +149,11 @@ impl OutcomeManager {
         }
 
         // 2. Reject if already settled
-        if env.storage().instance().has(&InstanceKey::FinalOutcome(signed.call_id)) {
+        if env
+            .storage()
+            .instance()
+            .has(&InstanceKey::FinalOutcome(signed.call_id))
+        {
             panic!("already settled");
         }
 
@@ -163,7 +182,9 @@ impl OutcomeManager {
         let outcome_hash: BytesN<32> = env.crypto().sha256(&message).into();
 
         // 7. Record oracle's vote (prevents duplicates)
-        env.storage().temporary().set(&submission_key, &outcome_hash);
+        env.storage()
+            .temporary()
+            .set(&submission_key, &outcome_hash);
 
         // 8. Tally votes for this outcome candidate
         let vote_key = TempKey::VoteCount(outcome_hash.clone(), signed.call_id);
@@ -198,7 +219,13 @@ impl OutcomeManager {
             .set(&InstanceKey::FinalOutcome(outcome.call_id), &outcome);
 
         // Cross-contract: resolve the call in the registry
-        registry_resolve_call(env, registry, outcome.call_id, outcome.outcome, outcome.price);
+        registry_resolve_call(
+            env,
+            registry,
+            outcome.call_id,
+            outcome.outcome,
+            outcome.price,
+        );
 
         emit_outcome_finalized(env, outcome.call_id, outcome.outcome, outcome.price);
     }
@@ -238,7 +265,11 @@ impl OutcomeManager {
         staker.require_auth();
 
         // 2. Verify the call is settled
-        if !env.storage().instance().has(&InstanceKey::FinalOutcome(call_id)) {
+        if !env
+            .storage()
+            .instance()
+            .has(&InstanceKey::FinalOutcome(call_id))
+        {
             panic!("call not settled");
         }
 
@@ -284,7 +315,11 @@ impl OutcomeManager {
     pub fn mark_settled(env: Env, registry: Address, call_id: u64) {
         require_admin(&env);
 
-        if !env.storage().instance().has(&InstanceKey::FinalOutcome(call_id)) {
+        if !env
+            .storage()
+            .instance()
+            .has(&InstanceKey::FinalOutcome(call_id))
+        {
             panic!("call not finalized");
         }
 
