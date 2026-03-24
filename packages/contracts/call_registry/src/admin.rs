@@ -24,13 +24,7 @@ pub fn set_admin(env: Env, new_admin: Address) {
     set_config(&env, &config);
     extend_storage_ttl(&env);
 
-    emit_admin_params_changed_address(
-        &env,
-        PARAM_ADMIN,
-        &new_admin, // changed_by — the incoming admin authorised this via the old admin's sig
-        &old_admin,
-        &new_admin,
-    );
+    emit_admin_params_changed_address(&env, PARAM_ADMIN, &new_admin, &old_admin, &new_admin);
 }
 
 /// Replace the outcome manager.
