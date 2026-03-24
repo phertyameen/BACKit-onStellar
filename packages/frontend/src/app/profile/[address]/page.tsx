@@ -5,11 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { StakeLedgerItem, UserStakesResponse } from '@/types'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const PAGE_SIZE = 20
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function PositionTag({ position }: { position: 'YES' | 'NO' }) {
   return position === 'YES' ? (
@@ -242,8 +238,6 @@ function Pagination({
   )
 }
 
-// ─── Filter bar ───────────────────────────────────────────────────────────────
-
 type StatusFilter = 'ALL' | 'PENDING' | 'RESOLVED'
 type PositionFilter = 'ALL' | 'YES' | 'NO'
 
@@ -300,8 +294,6 @@ function FilterBar({
     </div>
   )
 }
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StakesPage() {
   const params = useParams()
