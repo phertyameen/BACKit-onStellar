@@ -4,6 +4,7 @@ import { Repository, UpdateResult } from 'typeorm';
 import { NotificationsService } from './notifications.service';
 import { NotificationEntity } from './notification.entity';
 import { NotificationType } from './notification-type.enum';
+import { DispatchType } from './dispatch-type.enum';
 
 const mockNotification: NotificationEntity = {
     id: 1,
@@ -12,6 +13,8 @@ const mockNotification: NotificationEntity = {
     referenceId: '42',
     message: 'Someone backed your call',
     readStatus: false,
+    isDispatched: true,
+    dispatchType: DispatchType.NONE,
     createdAt: new Date('2026-01-01T00:00:00Z'),
 };
 
@@ -62,6 +65,8 @@ describe('NotificationsService', () => {
                 message: 'Someone backed your call',
                 referenceId: '42',
                 readStatus: false,
+                dispatchType: DispatchType.NONE,
+                isDispatched: true,
             });
             expect(repo.save).toHaveBeenCalledWith(mockNotification);
             expect(result).toEqual(mockNotification);

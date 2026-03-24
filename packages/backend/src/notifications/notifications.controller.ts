@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/s
 import { NotificationsService } from './notifications.service';
 import { GetNotificationsDto } from './dto/get-notifications.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
+import { DispatchType } from './dispatch-type.enum';
 
 @ApiTags('notifications')
 @Controller('notifications')
@@ -46,5 +47,23 @@ export class NotificationsController {
         @Body() body: MarkReadDto,
     ) {
         return this.notificationsService.markRead(userId, body.ids);
+    }
+
+    @Post('test-external-dispatch')
+    @HttpCode(HttpStatus.CREATED)
+    @ApiOperation({ summary: 'Trigger a test notification with external dispatch' })
+    @ApiQuery({ name: 'userId', required: true })
+    @ApiQuery({ name: 'type', required: true, enum: DispatchType })
+    async testExternalDispatch(
+        @Query('userId') userId: string,
+        @Query('type') type: DispatchType,
+    ) {
+        return this.notificationsService.notify(
+            userId,
+            'NEW_FOLLOWER' as any,
+            `This is a test ${type} notification!`,
+            undefined,
+            type,
+        );
     }
 }

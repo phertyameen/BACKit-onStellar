@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { NotificationEntity } from './notification.entity';
 import { NotificationType } from './notification-type.enum';
+import { DispatchType } from './dispatch-type.enum';
 
 export interface PaginatedNotifications {
     data: NotificationEntity[];
@@ -29,8 +30,9 @@ export class NotificationsService {
         type: NotificationType,
         message: string,
         referenceId?: string,
+        dispatchType: DispatchType = DispatchType.NONE,
     ): Promise<NotificationEntity> {
-        return this.createNotification(userId, type, message, referenceId);
+        return this.createNotification(userId, type, message, referenceId, dispatchType);
     }
 
     async createNotification(
@@ -38,6 +40,7 @@ export class NotificationsService {
         type: NotificationType,
         message: string,
         referenceId?: string,
+        dispatchType: DispatchType = DispatchType.NONE,
     ): Promise<NotificationEntity> {
         const notification = this.notificationsRepository.create({
             userId,
@@ -45,10 +48,12 @@ export class NotificationsService {
             message,
             referenceId,
             readStatus: false,
+            dispatchType,
+            isDispatched: dispatchType === DispatchType.NONE, // If none, it's considered dispatched (in-app only)
         });
 
         const saved = await this.notificationsRepository.save(notification);
-        this.logger.verbose(`Notification created: ${type} for user ${userId}`);
+        this.logger.verbose(`Notification created: ${type} for user ${userId} (Dispatch: ${dispatchType})`);
         return saved;
     }
 
@@ -97,39 +102,56 @@ export class NotificationsService {
         callCreatorId: string,
         backerAddress: string,
         callId: number,
+        dispatchType: DispatchType = DispatchType.NONE,
     ): Promise<void> {
         await this.notify(
             callCreatorId,
             NotificationType.BACKED_CALL,
             `${backerAddress.slice(0, 8)}... backed your call`,
             String(callId),
+            dispatchType,
         );
     }
 
-    async notifyCallEnded(userId: string, callId: number): Promise<void> {
+    async notifyCallEnded(
+        userId: string,
+        callId: number,
+        dispatchType: DispatchType = DispatchType.NONE,
+    ): Promise<void> {
         await this.notify(
             userId,
             NotificationType.CALL_ENDED,
             'A call you staked on has ended',
             String(callId),
+            dispatchType,
         );
     }
 
-    async notifyPayoutReady(userId: string, callId: number): Promise<void> {
+    async notifyPayoutReady(
+        userId: string,
+        callId: number,
+        dispatchType: DispatchType = DispatchType.NONE,
+    ): Promise<void> {
         await this.notify(
             userId,
             NotificationType.PAYOUT_READY,
             'You won! Claim your payout',
             String(callId),
+            dispatchType,
         );
     }
 
-    async notifyNewFollower(userId: string, followerAddress: string): Promise<void> {
+    async notifyNewFollower(
+        userId: string,
+        followerAddress: string,
+        dispatchType: DispatchType = DispatchType.NONE,
+    ): Promise<void> {
         await this.notify(
             userId,
             NotificationType.NEW_FOLLOWER,
             `${followerAddress.slice(0, 8)}... followed you`,
             followerAddress,
+            dispatchType,
         );
     }
 }

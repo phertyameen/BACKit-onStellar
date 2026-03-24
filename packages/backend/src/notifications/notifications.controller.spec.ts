@@ -3,6 +3,7 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationType } from './notification-type.enum';
 import { NotificationEntity } from './notification.entity';
+import { DispatchType } from './dispatch-type.enum';
 
 const mockNotification: NotificationEntity = {
     id: 1,
@@ -11,6 +12,8 @@ const mockNotification: NotificationEntity = {
     referenceId: '42',
     message: 'Someone backed your call',
     readStatus: false,
+    isDispatched: true,
+    dispatchType: DispatchType.NONE,
     createdAt: new Date('2026-01-01T00:00:00Z'),
 };
 
@@ -27,6 +30,7 @@ describe('NotificationsController', () => {
                     useValue: {
                         getNotifications: jest.fn(),
                         markRead: jest.fn(),
+                        notify: jest.fn(),
                     },
                 },
             ],
