@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PRICE_DEVIATION_CONFIG } from './price-deviation.config';
+import { PRICE_DEVIATION_CONFIG } from './config/oracle.config';
 
 export interface CoinGeckoPriceResult {
   symbol: string;

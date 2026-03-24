@@ -1,4 +1,3 @@
-// packages/backend/src/oracle/oracle.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { SorobanRpc } from '@stellar/stellar-sdk';
 import { TypeOrmModule } from '@nestjs/typeorm';

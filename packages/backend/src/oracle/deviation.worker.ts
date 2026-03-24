@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PriceDeviationService } from './price-deviation.service';
-import { PRICE_DEVIATION_CONFIG } from './price-deviation.config';
+import { PriceDeviationService } from './deiviation.service';
+import { PRICE_DEVIATION_CONFIG } from './config/oracle.config';
+import { OraclePriceEntity } from './entities/storedOraclePrice.entity';
 
 /**
  * Represents a stored oracle price row.
@@ -23,10 +24,9 @@ export class PriceDeviationWorker {
 
     /**
      * Inject your oracle price repository here.
-     * Replace `OraclePrice` with the actual entity class used in your project.
      * e.g. @InjectRepository(OraclePriceEntity)
      */
-    @InjectRepository('OraclePrice')
+    @InjectRepository(OraclePriceEntity)
     private readonly oraclePriceRepo: Repository<StoredOraclePrice>,
   ) {}
 

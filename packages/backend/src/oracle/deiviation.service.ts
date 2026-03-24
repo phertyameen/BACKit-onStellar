@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CoinGeckoService } from './coingecko.service';
-import { PriceDeviationLog } from './price-deviation-log.entity';
-import { PRICE_DEVIATION_CONFIG } from './price-deviation.config';
+import { PRICE_DEVIATION_CONFIG } from './config/oracle.config';
+import { PriceDeviationLog } from './entities/log.entity';
+import { CoinGeckoService } from './coinGeko.service';
 
 export interface OraclePrice {
   symbol: string;
