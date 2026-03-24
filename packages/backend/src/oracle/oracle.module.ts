@@ -1,4 +1,3 @@
-// packages/backend/src/oracle/oracle.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { SorobanRpc } from '@stellar/stellar-sdk';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -9,10 +8,14 @@ import { SigningService } from './signing.service';
 import { OracleCall } from './entities/oracle-call.entity';
 import { OracleOutcome } from './entities/oracle-outcome.entity';
 import { CallsModule } from '../calls/calls.module';
+import { CoinGeckoService } from './coinGeko.service';
+import { PriceDeviationService } from './deiviation.service';
+import { PriceDeviationWorker } from './deviation.worker';
+import { PriceDeviationLog } from './entities/log.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([OracleCall, OracleOutcome]),
+    TypeOrmModule.forFeature([OracleCall, OracleOutcome, PriceDeviationLog]),
     forwardRef(() => CallsModule),
   ],
   controllers: [OracleController],
@@ -20,6 +23,9 @@ import { CallsModule } from '../calls/calls.module';
     OracleService,
     PriceFetcherService,
     SigningService,
+    CoinGeckoService,
+    PriceDeviationService,
+    PriceDeviationWorker,
     {
       provide: SorobanRpc.Server,
       useFactory: () => {
@@ -29,6 +35,6 @@ import { CallsModule } from '../calls/calls.module';
       },
     },
   ],
-  exports: [OracleService],
+  exports: [OracleService, PriceDeviationService],
 })
 export class OracleModule { }
