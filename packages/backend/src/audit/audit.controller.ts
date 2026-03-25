@@ -24,12 +24,12 @@ import { QueryAuditLogsDto } from './dto/query-audit-logs.dto';
  * The important thing is that these routes are protected before they reach this
  * controller. The imports below are placeholder names; adjust to your auth module.
  */
-// import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-// import { AdminGuard } from '../auth/guards/admin.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @ApiTags('admin')
 @ApiBearerAuth('JWT-auth')
-// @UseGuards(JwtAuthGuard, AdminGuard)  ← uncomment when your guards are wired up
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('admin/audit-logs')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

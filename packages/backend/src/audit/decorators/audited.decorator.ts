@@ -1,6 +1,5 @@
-import { SetMetadata, applyDecorators, UseInterceptors } from '@nestjs/common';
+import { SetMetadata, applyDecorators } from '@nestjs/common';
 import { AuditActionType } from '../audit-log.entity';
-import { AuditInterceptor } from '../interceptors/audit.interceptor';
 
 export const AUDIT_ACTION_KEY = 'audit:action';
 export const AUDIT_RESOURCE_KEY = 'audit:resource';
@@ -30,6 +29,5 @@ export function Audited(
   return applyDecorators(
     SetMetadata(AUDIT_ACTION_KEY, actionType),
     SetMetadata(AUDIT_RESOURCE_KEY, getResource),
-    UseInterceptors(AuditInterceptor),
   );
 }
