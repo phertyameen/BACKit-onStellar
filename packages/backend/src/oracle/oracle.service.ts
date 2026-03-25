@@ -268,8 +268,29 @@ export class OracleService {
     call.failedAt    = null;
     if (finalPrice !== undefined) call.finalPrice = finalPrice;
 
-    this.logger.log(`Call ${callId} FORCE-RESOLVED by admin → ${resolution}`);
+  
+  this.logger.log(`Call ${callId} FORCE-RESOLVED by admin → ${resolution}`);
     return this.oracleCallRepository.save(call);
+  }
+
+  // ─── Admin: Oracle Configuration ──────────────────────────────────────────
+
+  async updateParams(
+    feedId: string,
+    params: { minResponses: number; heartbeatSeconds: number },
+  ): Promise<{ success: boolean; feedId: string }> {
+    this.logger.log(`Oracle params updated for feed ${feedId}: ${JSON.stringify(params)}`);
+    // In a real app, this would send a Soroban transaction
+    return { success: true, feedId };
+  }
+
+  async setQuorum(
+    roundId: string,
+    quorum: number,
+  ): Promise<{ success: boolean; roundId: string }> {
+    this.logger.log(`Oracle quorum set for round ${roundId}: ${quorum}`);
+    // In a real app, this would send a Soroban transaction
+    return { success: true, roundId };
   }
 
   // ─── Private Helpers ──────────────────────────────────────────────────────
