@@ -35,6 +35,13 @@ export class CallsController {
     return this.callsService.search(query);
   }
 
+  @Get(':id/odds')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(30) // Cache odds for 30s
+  getOdds(@Param('id', ParseUUIDPipe) id: string) {
+    return this.callsService.getOdds(id);
+  }
+
   @Post(':id/report')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
