@@ -97,8 +97,10 @@ export class RelayService {
       const response = await this.rpcServer.sendTransaction(finalTx);
       
       if (response.status === 'ERROR') {
-          this.logger.error(`Transaction failed: ${response.errorResultXdr}`);
-          throw new BadRequestException(`Transaction submission failed: ${response.errorResultXdr}`);
+          const errorMsg = (response as any).errorResultXdr || 
+                          (response.errorResult ? JSON.stringify(response.errorResult) : 'Unknown error');
+          this.logger.error(`Transaction failed: ${errorMsg}`);
+          throw new BadRequestException(`Transaction submission failed: ${errorMsg}`);
       }
       
       this.logger.log(`Relayed transaction ${response.hash} for contract call`);
