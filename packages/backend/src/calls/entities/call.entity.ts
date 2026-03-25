@@ -52,6 +52,12 @@ export class Call {
   @Column({ type: 'decimal', precision: 20, scale: 8, nullable: true })
   finalPrice: string | null;
 
+  @Column({ type: 'decimal', precision: 20, scale: 7, default: 0 })
+  totalYesStake: string;
+
+  @Column({ type: 'decimal', precision: 20, scale: 7, default: 0 })
+  totalNoStake: string;
+
   // ─── timestamps ───────────────────────────────────────────────────────────
 
   @CreateDateColumn()

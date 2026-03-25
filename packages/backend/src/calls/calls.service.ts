@@ -13,7 +13,6 @@ import { CallReport } from './entities/call-report.entity';
 import { Call, CallStatus } from './entities/call.entity';
 import { ReportCallDto } from './dto/report-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
-import { REPORT_THRESHOLD } from './constants/moderation.constants';
 import { OracleService } from '../oracle/oracle.service';
 
 @Injectable()
@@ -135,5 +134,33 @@ export class CallsService {
     if (finalPrice !== undefined) call.finalPrice = finalPrice;
 
     return this.callsRepository.save(call);
+  }
+
+  /**
+   * Calculate potential payout ratio (odds) for YES/NO selections.
+   */
+  async getOdds(id: string) {
+    const call = await this.getCallOrThrow(id);
+
+    const yesStake = parseFloat(call.totalYesStake || '0');
+    const noStake = parseFloat(call.totalNoStake || '0');
+    const totalPool = yesStake + noStake;
+
+    if (totalPool === 0) {
+      return {
+        yes: 2.0,
+        no: 2.0,
+        totalPool: 0,
+      };
+    }
+
+    const yesOdds = yesStake > 0 ? (totalPool / yesStake) : 2.0;
+    const noOdds = noStake > 0 ? (totalPool / noStake) : 2.0;
+
+    return {
+      yes: Number(yesOdds.toFixed(2)),
+      no: Number(noOdds.toFixed(2)),
+      totalPool: Number(totalPool.toFixed(7)),
+    };
   }
 }
