@@ -50,25 +50,40 @@ export class RelayService {
     // Validate inner transaction
     await this.validateTransaction(innerTx);
 
-    // If it's not a fee-bump, we wrap it in a fee-bump
-    // Actually, if the user sent a regular transaction, we create a fee-bump for it.
-    // The user should have signed the inner transaction already.
-    
+    // Security: Ensure inner transaction has at least one signature from the user
+    if (!innerTx.signatures || innerTx.signatures.length === 0) {
+      throw new BadRequestException('Inner transaction must be signed by the user');
+    }
+
+    // Security: Check transaction expiration (timebounds)
+    if (innerTx.timeBounds) {
+      const now = Math.floor(Date.now() / 1000);
+      const { minTime, maxTime } = innerTx.timeBounds;
+      if (maxTime !== '0' && now > parseInt(maxTime)) {
+        throw new BadRequestException('Transaction has expired');
+      }
+      if (minTime !== '0' && now < parseInt(minTime)) {
+        throw new BadRequestException('Transaction is not yet valid');
+      }
+    }
+
     let finalTx: FeeBumpTransaction;
     if (tx instanceof FeeBumpTransaction) {
-      // If they already sent a fee-bump, they expect us to sign it?
-      // But they'd need to know our public key to set it as fee source.
-      // Usually, the relayer creates the fee-bump.
-      finalTx = tx;
-      // We should check if the fee source is us
-      if (finalTx.feeSource !== this.hotWallet.publicKey()) {
-        throw new BadRequestException('Fee source in fee-bump transaction must be the relayer');
+      // If it's already a fee-bump, we check if we are the intended sponsor
+      if (tx.feeSource !== this.hotWallet.publicKey()) {
+        throw new BadRequestException(`Fee source mismatch. Expected ${this.hotWallet.publicKey()}`);
       }
+      finalTx = tx;
     } else {
       // Create a fee-bump transaction
+      // The outer fee must be at least inner_fee + base_fee. 
+      // We add a small margin (500 stroops) to ensure acceptance.
+      const innerFee = BigInt(innerTx.fee);
+      const outerFee = (innerFee + 500n).toString();
+
       finalTx = TransactionBuilder.buildFeeBumpTransaction(
         this.hotWallet,
-        innerTx.fee, // Or we can compute a higher fee if needed
+        outerFee,
         innerTx,
         networkPassphrase,
       );
@@ -80,10 +95,13 @@ export class RelayService {
     // Submit back to Stellar
     try {
       const response = await this.rpcServer.sendTransaction(finalTx);
+      
       if (response.status === 'ERROR') {
-          this.logger.error(`Transaction failed: ${JSON.stringify(response.errorResult)}`);
-          throw new BadRequestException('Transaction submission failed');
+          this.logger.error(`Transaction failed: ${response.errorResultXdr}`);
+          throw new BadRequestException(`Transaction submission failed: ${response.errorResultXdr}`);
       }
+      
+      this.logger.log(`Relayed transaction ${response.hash} for contract call`);
       return { hash: response.hash };
     } catch (error) {
       this.logger.error(`Relay submission error: ${error.message}`);
@@ -96,24 +114,32 @@ export class RelayService {
     const allowedContractId = settings.contractId;
 
     if (!allowedContractId) {
-      throw new BadRequestException('Target contract not configured');
+      this.logger.error('No allowed contract ID configured in platform settings');
+      throw new BadRequestException('Relay target contract not configured');
     }
 
-    // Check all operations for contract ID
+    // Check all operations
+    if (tx.operations.length === 0) {
+      throw new BadRequestException('Transaction has no operations');
+    }
+
     for (const op of tx.operations) {
+      // For Soroban, we only allow host function invocations in the relay
       if (op.type !== 'invokeHostFunction') {
-        throw new BadRequestException(`Operation type ${op.type} not allowed in relay`);
+        throw new BadRequestException(`Operation type ${op.type} not allowed in relay. Only invokeHostFunction is permitted.`);
       }
 
-      // Extract the HostFunction from the high-level operation object
-      const hostFunction = (op as any).func as xdr.HostFunction;
+      // Cast to the specific operation type to access Soroban-specific fields
+      const hostFunctionOp = op as any; 
+      const hostFunction = hostFunctionOp.func as xdr.HostFunction;
       
       if (!hostFunction) {
-          throw new BadRequestException('Malformed host function operation');
+          throw new BadRequestException('Malformed host function operation: missing function definition');
       }
       
+      // Ensure it's a contract invocation
       if (hostFunction.switch().value !== xdr.HostFunctionType.hostFunctionTypeInvokeContract().value) {
-          throw new BadRequestException('Only contract invocations are allowed');
+          throw new BadRequestException('Only contract invocations are allowed in this relay');
       }
 
       const invokeContractArgs = hostFunction.invokeContract();
@@ -123,11 +149,12 @@ export class RelayService {
       if (contractAddress.switch().value === xdr.ScAddressType.scAddressTypeContract().value) {
           contractId = StrKey.encodeContract(contractAddress.contractId());
       } else {
-          throw new BadRequestException('Invalid contract address type');
+          throw new BadRequestException('Invalid contract address type: must be a contract ID');
       }
 
       if (contractId !== allowedContractId) {
-        throw new BadRequestException(`Transaction directed at unauthorized contract: ${contractId}`);
+        this.logger.warn(`Unauthorized relay attempt to contract: ${contractId}`);
+        throw new BadRequestException(`Transaction directed at unauthorized contract: ${contractId}. Only ${allowedContractId} is allowed.`);
       }
     }
   }
