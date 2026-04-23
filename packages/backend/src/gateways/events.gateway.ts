@@ -2,63 +2,47 @@ import {
   WebSocketGateway,
   WebSocketServer,
   SubscribeMessage,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
-  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
   WsException,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { UseGuards, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 
-// ---------------------------------------------------------------------------
-// Payload shapes
-// ---------------------------------------------------------------------------
+import { WsJwtGuard } from './guards/ws-jwt.guard';
+import {
+  SubscribeMarketDto,
+  UnsubscribeMarketDto,
+} from './dto/subscribe-market.dto';
+import {
+  StakeCreatedEvent,
+  PriceUpdatedEvent,
+  UserNotificationEvent,
+  OutcomeProposedEvent,
+  DisputeRaisedEvent,
+  DisputeResolvedEvent,
+} from './events.types';
 
-export interface StakeCreatedPayload {
-  marketId: string;
-  stakeId: string;
-  userId: string;
-  amount: number;
-  odds: number;
-  selection: string;
-  createdAt: string;
-}
-
-export interface MarketPriceUpdatedPayload {
-  marketId: string;
-  prices: Record<string, number>; // selection → price
-  updatedAt: string;
-}
-
-export interface UserNotificationPayload {
-  userId: string;
-  type: string;
-  message: string;
-  meta?: Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
-// Room helpers
-// ---------------------------------------------------------------------------
-
-const marketRoom = (marketId: string) => `market:${marketId}`;
-const userRoom = (userId: string) => `user:${userId}`;
-
-// ---------------------------------------------------------------------------
-// Gateway
-// ---------------------------------------------------------------------------
+/**
+ * Room naming conventions
+ *  - Market room : `market:{marketId}`
+ *  - User room   : `user:{userId}`
+ */
+const MARKET_ROOM = (id: string) => `market:${id}`;
+const USER_ROOM = (id: string) => `user:${id}`;
 
 @WebSocketGateway({
+  namespace: '/events',
   cors: {
-    origin: '*', // tighten in production via ConfigService
+    origin: process.env.CORS_ORIGIN ?? '*',
     credentials: true,
   },
-  namespace: '/ws',
+  transports: ['websocket', 'polling'],
 })
 export class EventsGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -68,211 +52,265 @@ export class EventsGateway
 
   private readonly logger = new Logger(EventsGateway.name);
 
-  constructor(
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
-  ) {}
+  constructor(private readonly jwtService: JwtService) {}
 
-  // -------------------------------------------------------------------------
-  // Lifecycle hooks
-  // -------------------------------------------------------------------------
+  // ── Lifecycle hooks ────────────────────────────────────────────────────────
 
   afterInit(server: Server) {
-    this.logger.log('WebSocket gateway initialised');
+    this.logger.log('WebSocket gateway initialised on namespace /events');
   }
 
-  handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
-    // Optionally send a welcome event so the client knows the socket is ready
-    client.emit('connected', { socketId: client.id });
+  /**
+   * On every new connection attempt we immediately try to authenticate the
+   * client via the bearer token supplied in the handshake.  Authenticated
+   * clients are automatically joined to their private user room; anonymous
+   * clients can still subscribe to public market rooms.
+   */
+  async handleConnection(client: Socket) {
+    try {
+      const userId = this.extractUserIdFromHandshake(client);
+      if (userId) {
+        client.data.userId = userId;
+        await client.join(USER_ROOM(userId));
+        this.logger.debug(`Client ${client.id} authenticated as user ${userId}`);
+      } else {
+        client.data.userId = null;
+        this.logger.debug(`Client ${client.id} connected anonymously`);
+      }
+    } catch {
+      // Non-fatal — client is treated as anonymous
+      client.data.userId = null;
+    }
+
+    this.logger.log(
+      `Client connected: ${client.id} | total: ${this.server.sockets.sockets.size}`,
+    );
   }
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
-  // -------------------------------------------------------------------------
-  // Public subscriptions — Market rooms
-  // -------------------------------------------------------------------------
+  // ── Public market subscriptions ────────────────────────────────────────────
 
   /**
-   * Any client (authenticated or anonymous) can subscribe to a market room
-   * to receive live stake events and price updates for that market.
+   * Subscribe to live events (stakes, price changes) for a specific market.
    *
-   * Client → server:
-   *   emit('market:subscribe', { marketId: 'abc123' })
-   *
-   * Server → client confirmations:
-   *   emit('market:subscribed', { marketId })   on success
-   *   emit('error', { message })                on failure
+   * Payload: { marketId: string }
+   * Emits back: "subscribed" | "error"
    */
-  @SubscribeMessage('market:subscribe')
-  handleMarketSubscribe(
-    @MessageBody() data: { marketId: string },
+  @SubscribeMessage('subscribeMarket')
+  async handleSubscribeMarket(
+    @MessageBody() dto: SubscribeMarketDto,
     @ConnectedSocket() client: Socket,
   ) {
-    const { marketId } = data ?? {};
-
-    if (!marketId || typeof marketId !== 'string') {
-      client.emit('error', { message: 'marketId is required' });
-      return;
-    }
-
-    const room = marketRoom(marketId);
-    client.join(room);
-    this.logger.log(`Socket ${client.id} joined room "${room}"`);
-
-    client.emit('market:subscribed', { marketId });
+    const room = MARKET_ROOM(dto.marketId);
+    await client.join(room);
+    this.logger.debug(`Client ${client.id} joined room ${room}`);
+    return { event: 'subscribed', data: { marketId: dto.marketId } };
   }
 
   /**
    * Unsubscribe from a market room.
    *
-   * Client → server:
-   *   emit('market:unsubscribe', { marketId: 'abc123' })
+   * Payload: { marketId: string }
+   * Emits back: "unsubscribed"
    */
-  @SubscribeMessage('market:unsubscribe')
-  handleMarketUnsubscribe(
-    @MessageBody() data: { marketId: string },
+  @SubscribeMessage('unsubscribeMarket')
+  async handleUnsubscribeMarket(
+    @MessageBody() dto: UnsubscribeMarketDto,
     @ConnectedSocket() client: Socket,
   ) {
-    const { marketId } = data ?? {};
-
-    if (!marketId) return;
-
-    const room = marketRoom(marketId);
-    client.leave(room);
-    this.logger.log(`Socket ${client.id} left room "${room}"`);
-
-    client.emit('market:unsubscribed', { marketId });
+    const room = MARKET_ROOM(dto.marketId);
+    await client.leave(room);
+    this.logger.debug(`Client ${client.id} left room ${room}`);
+    return { event: 'unsubscribed', data: { marketId: dto.marketId } };
   }
 
-  // -------------------------------------------------------------------------
-  // Private subscriptions — User notification rooms (requires JWT)
-  // -------------------------------------------------------------------------
+  // ── Private user notifications ─────────────────────────────────────────────
 
   /**
-   * Authenticated clients subscribe to their own private notification room.
+   * Authenticated clients re-confirm their identity and join/refresh their
+   * private user room.  Useful when the JWT is set after the initial
+   * connection (e.g., login in a SPA without reconnecting).
    *
-   * Client → server:
-   *   emit('user:subscribe', { token: '<jwt>' })
-   *
-   * Server → client:
-   *   emit('user:subscribed', { userId })   on success
-   *   emit('error', { message })            on failure
+   * Payload: { token: string }
+   * Emits back: "authenticated" | WsException
    */
-  @SubscribeMessage('user:subscribe')
-  async handleUserSubscribe(
-    @MessageBody() data: { token: string },
+  @SubscribeMessage('authenticate')
+  async handleAuthenticate(
+    @MessageBody() payload: { token: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const { token } = data ?? {};
-
-    if (!token) {
-      client.emit('error', {
-        message: 'JWT token is required for private subscriptions',
-      });
-      return;
-    }
-
     try {
-      const secret = this.configService.get<string>('JWT_SECRET');
-      const payload = await this.jwtService.verifyAsync(token, { secret });
-      const userId: string = payload.sub ?? payload.userId;
-
-      if (!userId)
-        throw new Error('Token does not contain a valid user identifier');
-
-      const room = userRoom(userId);
-      client.join(room);
-
-      // Store userId on socket data for later reference
-      client.data.userId = userId;
-
-      this.logger.log(`Socket ${client.id} joined private room "${room}"`);
-      client.emit('user:subscribed', { userId });
-    } catch (err) {
-      this.logger.warn(
-        `Authentication failed for socket ${client.id}: ${(err as Error).message}`,
+      const decoded = await this.jwtService.verifyAsync<{ sub: string }>(
+        payload.token,
       );
-      client.emit('error', {
-        message: 'Authentication failed: invalid or expired token',
-      });
+      const userId = decoded.sub;
+
+      // Leave any stale user rooms first
+      if (client.data.userId && client.data.userId !== userId) {
+        await client.leave(USER_ROOM(client.data.userId));
+      }
+
+      client.data.userId = userId;
+      await client.join(USER_ROOM(userId));
+
+      this.logger.debug(
+        `Client ${client.id} re-authenticated as user ${userId}`,
+      );
+      return { event: 'authenticated', data: { userId } };
+    } catch {
+      throw new WsException('Invalid or expired token');
     }
   }
 
-  /**
-   * Leave the private user room.
-   *
-   * Client → server:
-   *   emit('user:unsubscribe')
-   */
-  @SubscribeMessage('user:unsubscribe')
-  handleUserUnsubscribe(@ConnectedSocket() client: Socket) {
-    const userId: string | undefined = client.data.userId;
-
-    if (userId) {
-      const room = userRoom(userId);
-      client.leave(room);
-      delete client.data.userId;
-      this.logger.log(`Socket ${client.id} left private room "${room}"`);
-      client.emit('user:unsubscribed', { userId });
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // EventEmitter2 listeners — bridge internal events → WebSocket broadcasts
-  // -------------------------------------------------------------------------
+  // ── EventEmitter2 listeners → broadcast to rooms ───────────────────────────
 
   /**
-   * Fired by the Stakes service when a new stake is placed.
-   * Broadcasts to all clients subscribed to the affected market room.
-   *
-   * Internal event name: 'stake.created'  (matches Issue 9 convention)
+   * Fired when a new stake is placed on a market (Issue 9 hook: "stake.created").
+   * Broadcasts to all clients in the market room.
    */
   @OnEvent('stake.created')
-  onStakeCreated(payload: StakeCreatedPayload) {
-    const room = marketRoom(payload.marketId);
-    this.logger.debug(`Broadcasting stake.created to room "${room}"`);
-    this.server.to(room).emit('stake:created', payload);
+  handleStakeCreated(event: StakeCreatedEvent) {
+    this.logger.debug(
+      `[stake.created] marketId=${event.marketId} staker=${event.staker}`,
+    );
+    this.server
+      .to(MARKET_ROOM(event.marketId))
+      .emit('stakeCreated', event);
   }
 
   /**
-   * Fired when market prices are updated (e.g. odds change).
-   * Broadcasts to all clients in the affected market room.
-   *
-   * Internal event name: 'market.priceUpdated'
+   * Fired when an oracle or price feed updates a market's price.
+   * Broadcasts to all clients in the market room.
    */
-  @OnEvent('market.priceUpdated')
-  onMarketPriceUpdated(payload: MarketPriceUpdatedPayload) {
-    const room = marketRoom(payload.marketId);
-    this.logger.debug(`Broadcasting market.priceUpdated to room "${room}"`);
-    this.server.to(room).emit('market:priceUpdated', payload);
+  @OnEvent('price.updated')
+  handlePriceUpdated(event: PriceUpdatedEvent) {
+    this.logger.debug(
+      `[price.updated] marketId=${event.marketId} price=${event.price}`,
+    );
+    this.server
+      .to(MARKET_ROOM(event.marketId))
+      .emit('priceUpdated', event);
   }
 
   /**
-   * Fired when a push notification should be delivered to a specific user.
-   * Broadcasts only to the private room of that user.
-   *
-   * Internal event name: 'notification.push'
+   * Fired when a new outcome is proposed for a market.
+   * Broadcasts to all clients in the market room.
    */
-  @OnEvent('notification.push')
-  onNotificationPush(payload: UserNotificationPayload) {
-    const room = userRoom(payload.userId);
-    this.logger.debug(`Broadcasting notification to room "${room}"`);
-    this.server.to(room).emit('notification', payload);
+  @OnEvent('outcome.proposed')
+  handleOutcomeProposed(event: OutcomeProposedEvent) {
+    this.logger.debug(
+      `[outcome.proposed] marketId=${event.marketId} callId=${event.callId}`,
+    );
+    this.server
+      .to(MARKET_ROOM(event.marketId))
+      .emit('outcomeProposed', event);
   }
 
-  // -------------------------------------------------------------------------
-  // Utility — push a notification from elsewhere in the codebase
-  // -------------------------------------------------------------------------
+  /**
+   * Fired when an outcome is disputed (from the Stellar contract layer).
+   * Broadcasts to the market room AND the staker's private room.
+   */
+  @OnEvent('dispute.raised')
+  handleDisputeRaised(event: DisputeRaisedEvent) {
+    this.logger.debug(
+      `[dispute.raised] callId=${event.callId} staker=${event.staker}`,
+    );
+    this.server
+      .to(MARKET_ROOM(event.marketId))
+      .emit('disputeRaised', event);
 
-  /** Programmatically push a notification to a user without going through EventEmitter. */
-  pushNotificationToUser(
-    userId: string,
-    notification: Omit<UserNotificationPayload, 'userId'>,
-  ) {
-    const room = userRoom(userId);
-    this.server.to(room).emit('notification', { userId, ...notification });
+    // Also push to the staker's private room
+    if (event.staker) {
+      this.server
+        .to(USER_ROOM(event.staker))
+        .emit('notification', {
+          type: 'dispute.raised',
+          payload: event,
+        });
+    }
+  }
+
+  /**
+   * Fired when admin/DAO resolves a dispute.
+   * Broadcasts to the market room; additionally notifies the original staker.
+   */
+  @OnEvent('dispute.resolved')
+  handleDisputeResolved(event: DisputeResolvedEvent) {
+    this.logger.debug(
+      `[dispute.resolved] callId=${event.callId} resolution=${event.resolution}`,
+    );
+    this.server
+      .to(MARKET_ROOM(event.marketId))
+      .emit('disputeResolved', event);
+
+    if (event.staker) {
+      this.server
+        .to(USER_ROOM(event.staker))
+        .emit('notification', {
+          type: 'dispute.resolved',
+          payload: event,
+        });
+    }
+  }
+
+  /**
+   * Generic user-targeted push notification (Issue 9 hook: "user.notification").
+   * Routes exclusively to the recipient's private room.
+   */
+  @OnEvent('user.notification')
+  handleUserNotification(event: UserNotificationEvent) {
+    this.logger.debug(
+      `[user.notification] userId=${event.userId} type=${event.type}`,
+    );
+    this.server
+      .to(USER_ROOM(event.userId))
+      .emit('notification', {
+        type: event.type,
+        payload: event.payload,
+        timestamp: event.timestamp ?? Date.now(),
+      });
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /**
+   * Extract and verify a JWT from the Socket.io handshake.
+   * Accepts the token from either:
+   *   - Authorization header: "Bearer <token>"
+   *   - Query param: ?token=<token>
+   * Returns the user's `sub` claim, or null if absent/invalid.
+   */
+  private extractUserIdFromHandshake(client: Socket): string | null {
+    try {
+      const authHeader =
+        (client.handshake.headers.authorization as string) ?? '';
+      const queryToken = client.handshake.query.token as string | undefined;
+
+      const raw = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : queryToken;
+
+      if (!raw) return null;
+
+      const decoded = this.jwtService.verify<{ sub: string }>(raw);
+      return decoded.sub ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Imperative broadcast helpers (usable from other services) ─────────────
+
+  /** Broadcast an arbitrary event to an entire market room. */
+  broadcastToMarket<T>(marketId: string, event: string, data: T): void {
+    this.server.to(MARKET_ROOM(marketId)).emit(event, data);
+  }
+
+  /** Send an event to a specific user's private room. */
+  sendToUser<T>(userId: string, event: string, data: T): void {
+    this.server.to(USER_ROOM(userId)).emit(event, data);
   }
 }
