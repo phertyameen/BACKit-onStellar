@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN};
+use soroban_sdk::{contracttype, Address, BytesN, Env};
 
 /// Represents a finalized outcome after quorum is reached
 #[contracttype]
@@ -28,33 +28,36 @@ pub struct SignedOutcome {
     pub signature: BytesN<64>,
 }
 
-// ─── Storage Keys ─────────────────────────────────────────────────────────────
-
 #[contracttype]
 #[derive(Clone)]
 pub enum InstanceKey {
-    /// The admin address
     Admin,
-    /// Map<BytesN<32>, bool> of trusted oracle pubkeys
     Oracles,
-    /// Minimum number of matching oracle votes needed to finalize
     Quorum,
-    /// FinalOutcome(call_id) ─ set once a call is settled
     FinalOutcome(u64),
-    /// Claimed(call_id, staker) ─ prevents double-claims
     Claimed(u64, Address),
-    /// Address that receives protocol fees
     FeeCollector,
-    /// Fee in basis points (0–10000)
     FeeBps,
+    /// Stored CallRegistry address; set via set_registry() to avoid caller-supplied forgery
+    Registry,
 }
 
-/// Short-lived keys cleared after settlement (temporary storage tier)
 #[contracttype]
 #[derive(Clone)]
 pub enum TempKey {
-    /// (oracle_pubkey, call_id) ─ guards against duplicate oracle submissions
     Submission(BytesN<32>, u64),
-    /// (outcome_hash, call_id) ─ vote tally per outcome candidate before quorum
     VoteCount(BytesN<32>, u64),
+}
+
+/// Store the CallRegistry address in instance storage.
+pub fn set_registry(env: &Env, registry: Address) {
+    env.storage().instance().set(&InstanceKey::Registry, &registry);
+}
+
+/// Read the stored CallRegistry address; panics if not set.
+pub fn get_registry(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&InstanceKey::Registry)
+        .expect("registry not set")
 }
