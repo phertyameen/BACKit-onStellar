@@ -2,9 +2,38 @@
 
 use soroban_sdk::{
     contract, contractimpl,
-    testutils::{Address as _, Events as _, Ledger as _},
+    testutils::{Address as _, Events as _, Ledger as _, LedgerInfo},
     Vec, Address, Env, IntoVal, Symbol, Bytes, String as SorobanString
 };
+
+/// Helper: build a default LedgerInfo for tests
+fn ledger_info(sequence: u32) -> LedgerInfo {
+    LedgerInfo {
+        timestamp: 1_700_000_000,
+        protocol_version: 21,
+        sequence_number: sequence,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 1,
+        min_persistent_entry_ttl: 1,
+        max_entry_ttl: 6_312_000, // ~1 year in ledgers
+    }
+}
+ 
+/// Convenience: register the contract and return (env, client)
+fn setup() -> (Env, CallRegistryClient<'static>) {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(ledger_info(100));
+ 
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    (env, client)
+}
+ 
+fn mk_str(env: &Env, s: &str) -> String {
+    String::from_str(env, s)
+}
 
 #[contract]
 pub struct MockToken;
@@ -146,6 +175,216 @@ fn test_set_fee_max_boundary_is_valid() {
     let (_env, client, _admin, _om) = setup();
     client.set_fee(&10_000_u32); // exactly 100 % — allowed
     assert_eq!(client.get_config().fee_bps, 10_000);
+}
+
+#[test]
+fn test_ttl_constants_are_ledger_based() {
+    use crate::storage::{INSTANCE_BUMP_AMOUNT, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD};
+ 
+    // Ledgers per day ≈ 17_280  (86_400s / 5s per ledger)
+    let ledgers_per_day: u32 = 17_280;
+ 
+    // Threshold should be at least 28 days
+    assert!(
+        PERSISTENT_LIFETIME_THRESHOLD >= ledgers_per_day * 28,
+        "PERSISTENT_LIFETIME_THRESHOLD should be at least 28 days ({} ledgers)",
+        ledgers_per_day * 28
+    );
+ 
+    // Bump should be greater than threshold
+    assert!(
+        PERSISTENT_BUMP_AMOUNT > PERSISTENT_LIFETIME_THRESHOLD,
+        "PERSISTENT_BUMP_AMOUNT must exceed PERSISTENT_LIFETIME_THRESHOLD"
+    );
+ 
+    // Neither constant should be anywhere near 31_536_000 (the old incorrect value)
+    assert!(
+        PERSISTENT_BUMP_AMOUNT < 10_000_000,
+        "PERSISTENT_BUMP_AMOUNT looks like it is still in seconds, not ledgers"
+    );
+    assert!(
+        INSTANCE_BUMP_AMOUNT < 10_000_000,
+        "INSTANCE_BUMP_AMOUNT looks like it is still in seconds, not ledgers"
+    );
+}
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// set_call: persistent TTL is bumped on write
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_set_call_extends_persistent_ttl() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let call_id = mk_str(&env, "call_001");
+ 
+    client.set_call(
+        &call_id,
+        &creator,
+        &mk_str(&env, "BTC hits 100k"),
+        &mk_str(&env, "Prediction: BTC > 100k by year end"),
+        &(env.ledger().timestamp() + 86_400),
+    );
+ 
+    // The persistent entry for this call must have a TTL ≥ PERSISTENT_BUMP_AMOUNT
+    // (measured from the current ledger sequence).
+    env.as_contract(&client.address, || {
+        use crate::storage::{DataKey, PERSISTENT_BUMP_AMOUNT};
+        let key = DataKey::Call(mk_str(&env, "call_001"));
+        let live_until = env.storage().persistent().get_ttl(&key);
+        let current_seq = env.ledger().sequence();
+        assert!(
+            live_until >= current_seq + PERSISTENT_BUMP_AMOUNT - 1,
+            "Call TTL not extended after set_call: live_until={live_until}, expected >= {}",
+            current_seq + PERSISTENT_BUMP_AMOUNT - 1
+        );
+    });
+}
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// StakerCalls: persistent TTL is bumped when the list is written
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_set_call_extends_staker_calls_ttl() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let call_id = mk_str(&env, "call_002");
+ 
+    client.set_call(
+        &call_id,
+        &creator,
+        &mk_str(&env, "ETH flippening"),
+        &mk_str(&env, "ETH market cap surpasses BTC"),
+        &(env.ledger().timestamp() + 86_400),
+    );
+ 
+    env.as_contract(&client.address, || {
+        use crate::storage::{DataKey, PERSISTENT_BUMP_AMOUNT};
+        let key = DataKey::StakerCalls(creator.clone());
+        let live_until = env.storage().persistent().get_ttl(&key);
+        let current_seq = env.ledger().sequence();
+        assert!(
+            live_until >= current_seq + PERSISTENT_BUMP_AMOUNT - 1,
+            "StakerCalls TTL not extended after set_call"
+        );
+    });
+}
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// extend_call_ttl: anyone can bump a call's TTL
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_extend_call_ttl_bumps_ttl() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let call_id = mk_str(&env, "call_003");
+ 
+    // Create the call at ledger 100
+    client.set_call(
+        &call_id,
+        &creator,
+        &mk_str(&env, "SOL hits $1000"),
+        &mk_str(&env, "Solana reaches 4 figures"),
+        &(env.ledger().timestamp() + 172_800),
+    );
+ 
+    // Advance ledger sequence to simulate time passing
+    env.ledger().set(ledger_info(200_000));
+ 
+    // A different account calls extend_call_ttl (no auth needed)
+    let result = client.extend_call_ttl(&call_id);
+    assert!(result, "extend_call_ttl should return true for existing call");
+ 
+    env.as_contract(&client.address, || {
+        use crate::storage::{DataKey, PERSISTENT_BUMP_AMOUNT};
+        let key = DataKey::Call(mk_str(&env, "call_003"));
+        let live_until = env.storage().persistent().get_ttl(&key);
+        let current_seq = env.ledger().sequence(); // 200_000
+        assert!(
+            live_until >= current_seq + PERSISTENT_BUMP_AMOUNT - 1,
+            "extend_call_ttl did not refresh TTL correctly"
+        );
+    });
+}
+ 
+#[test]
+fn test_extend_call_ttl_returns_false_for_missing_call() {
+    let (env, client) = setup();
+    let nonexistent = mk_str(&env, "does_not_exist");
+    let result = client.extend_call_ttl(&nonexistent);
+    assert!(!result, "extend_call_ttl should return false for non-existent call");
+}
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// resolve_call also re-extends the call's TTL
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_resolve_call_extends_ttl() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let call_id = mk_str(&env, "call_004");
+ 
+    client.set_call(
+        &call_id,
+        &creator,
+        &mk_str(&env, "DOGE moon"),
+        &mk_str(&env, "DOGE reaches $1"),
+        &(env.ledger().timestamp() + 86_400),
+    );
+ 
+    // Advance time slightly
+    env.ledger().set(ledger_info(5_000));
+ 
+    client.resolve_call(&call_id, &creator, &true);
+ 
+    env.as_contract(&client.address, || {
+        use crate::storage::{DataKey, PERSISTENT_BUMP_AMOUNT};
+        let key = DataKey::Call(mk_str(&env, "call_004"));
+        let live_until = env.storage().persistent().get_ttl(&key);
+        let current_seq = env.ledger().sequence();
+        assert!(
+            live_until >= current_seq + PERSISTENT_BUMP_AMOUNT - 1,
+            "resolve_call did not extend TTL"
+        );
+    });
+}
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// get_staker_calls: staker list is correct and TTL was bumped
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+#[test]
+fn test_staker_calls_accumulate_and_ttl_bumped() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+ 
+    for i in 0u32..3 {
+        let call_id = String::from_str(&env, &soroban_sdk::format!("call_{i}"));
+        client.set_call(
+            &call_id,
+            &creator,
+            &mk_str(&env, "title"),
+            &mk_str(&env, "desc"),
+            &(env.ledger().timestamp() + 86_400),
+        );
+    }
+ 
+    let calls = client.get_staker_calls(&creator);
+    assert_eq!(calls.len(), 3, "Expected 3 calls in staker list");
+ 
+    env.as_contract(&client.address, || {
+        use crate::storage::{DataKey, PERSISTENT_BUMP_AMOUNT};
+        let key = DataKey::StakerCalls(creator.clone());
+        let live_until = env.storage().persistent().get_ttl(&key);
+        let current_seq = env.ledger().sequence();
+        assert!(
+            live_until >= current_seq + PERSISTENT_BUMP_AMOUNT - 1,
+            "StakerCalls TTL not bumped after third entry"
+        );
+    });
 }
  
 #[test]
