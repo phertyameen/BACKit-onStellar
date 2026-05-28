@@ -30,6 +30,28 @@ export class CallsRepository extends Repository<Call> {
       .getManyAndCount();
   }
 
+  async findFeedByFollowing(
+    address: string,
+    page: number,
+    limit: number,
+  ): Promise<[Call[], number]> {
+    return this.visibleQuery()
+      .andWhere(
+        `call.creatorAddress IN (
+          SELECT u_following.walletAddress
+          FROM users u_follower
+          JOIN user_follows uf ON uf."followerId" = u_follower.id
+          JOIN users u_following ON u_following.id = uf."followingId"
+          WHERE u_follower.walletAddress = :address
+        )`,
+        { address },
+      )
+      .orderBy('call.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+  }
+
   async searchVisible(
     search: string,
     page: number,

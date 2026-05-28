@@ -30,6 +30,14 @@ export class CallsController {
     return this.callsService.getFeed(query);
   }
 
+  @Get('feed/following')
+  getFollowingFeed(
+    @Query('address') address: string,
+    @Query() query: QueryCallsDto,
+  ) {
+    return this.callsService.getFollowingFeed(address, query);
+  }
+
   @Get('search')
   search(@Query() query: QueryCallsDto) {
     return this.callsService.search(query);
