@@ -1,7 +1,8 @@
 use soroban_sdk::{Address, Env};
 
 use crate::events::{
-    emit_admin_params_changed_address, emit_admin_params_changed_u32, PARAM_ADMIN, PARAM_FEE_BPS,
+    emit_admin_params_changed_address, emit_admin_params_changed_i128,
+    emit_admin_params_changed_u32, PARAM_ADMIN, PARAM_FEE_BPS, PARAM_MAX_STAKE_PER_USER,
     PARAM_OUTCOME_MANAGER,
 };
 use crate::storage::{extend_storage_ttl, get_config, set_config};
@@ -81,4 +82,38 @@ pub fn set_fee(env: Env, new_fee_bps: u32) {
     extend_storage_ttl(&env);
 
     emit_admin_params_changed_u32(&env, PARAM_FEE_BPS, &config.admin, old_fee_bps, new_fee_bps);
+}
+
+/// Set the maximum stake any single user may place per call per position.
+///
+/// Pass `0` to remove the cap (unlimited).
+///
+/// # Authorization
+/// Current admin must sign.
+///
+/// # Panics
+/// * Contract not initialized
+/// * `new_max` is negative
+pub fn set_max_stake_per_user(env: Env, new_max: i128) {
+    if new_max < 0 {
+        panic!("max_stake_per_user cannot be negative");
+    }
+
+    let mut config = get_config(&env).expect("Contract not initialized");
+
+    config.admin.require_auth();
+
+    let old_max = config.max_stake_per_user;
+    config.max_stake_per_user = new_max;
+
+    set_config(&env, &config);
+    extend_storage_ttl(&env);
+
+    emit_admin_params_changed_i128(
+        &env,
+        PARAM_MAX_STAKE_PER_USER,
+        &config.admin,
+        old_max,
+        new_max,
+    );
 }

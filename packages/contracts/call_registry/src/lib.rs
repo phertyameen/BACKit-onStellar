@@ -63,6 +63,7 @@ impl CallRegistry {
             admin: admin.clone(),
             outcome_manager: outcome_manager.clone(),
             fee_bps: 0,
+            max_stake_per_user: 0,
         };
 
         set_config(&env, &config);
@@ -116,6 +117,7 @@ impl CallRegistry {
             condition,
             settled: false,
             created_at: current_timestamp,
+            cancelled: false,
         };
 
         set_call(&env, &call);
@@ -164,10 +166,26 @@ impl CallRegistry {
             panic!("Call has been settled");
         }
 
+        if call.cancelled {
+            panic!("Call has been cancelled");
+        }
+
         let stake_position = match StakePosition::from_u32(position) {
             Some(p) => p,
             None => panic!("Invalid position: must be 1 (UP) or 2 (DOWN)"),
         };
+
+        // Per-user stake cap
+        let config = get_config(&env).expect("Contract not initialized");
+        if config.max_stake_per_user > 0 {
+            let existing = match stake_position {
+                StakePosition::Up => call.up_stakes.get(staker.clone()).unwrap_or(0),
+                StakePosition::Down => call.down_stakes.get(staker.clone()).unwrap_or(0),
+            };
+            if existing + amount > config.max_stake_per_user {
+                panic!("Stake exceeds max_stake_per_user cap");
+            }
+        }
 
         let token_client = token::Client::new(&env, &call.stake_token);
         token_client.transfer(&staker, &env.current_contract_address(), &amount);
@@ -195,6 +213,12 @@ impl CallRegistry {
         emit_stake_added(&env, call_id, &staker, amount, position);
 
         call
+    }
+
+    /// Set the maximum individual stake per user per position per call (admin only).
+    /// Pass `0` to remove the cap.
+    pub fn set_max_stake_per_user(env: Env, new_max: i128) {
+        admin::set_max_stake_per_user(env, new_max);
     }
 
     /// Get call data by ID

@@ -3,7 +3,7 @@
 use soroban_sdk::{
     contract, contractimpl,
     testutils::{Address as _, Events as _, Ledger as _},
-    Vec, Address, Env, IntoVal, Symbol, Bytes, String as SorobanString
+    Address, Bytes, Env, IntoVal, String as SorobanString, Symbol, Vec,
 };
 
 #[contract]
@@ -16,144 +16,380 @@ impl MockToken {
 
 mod call_registry {
     use super::*;
+    use crate::storage::DataKey;
     use crate::types::ConditionType;
     use crate::{CallRegistry, CallRegistryClient};
-    use crate::storage::DataKey;
 
     fn setup() -> (Env, CallRegistryClient<'static>, Address, Address) {
-    let env = Env::default();
-    env.mock_all_auths();
- 
-    let contract_id = env.register_contract(None, CallRegistry);
-    let client = CallRegistryClient::new(&env, &contract_id);
- 
-    let admin = Address::generate(&env);
-    let outcome_manager = Address::generate(&env);
- 
-    client.initialize(&admin, &outcome_manager);
- 
-    (env, client, admin, outcome_manager)
-}
- 
-// ── set_admin ─────────────────────────────────────────────────────────────────
- 
-#[test]
-fn test_set_admin_updates_config() {
-    let (env, client, _admin, _om) = setup();
-    let new_admin = Address::generate(&env);
- 
-    client.set_admin(&new_admin);
- 
-    assert_eq!(client.get_config().admin, new_admin);
-}
- 
-#[test]
-fn test_set_admin_emits_admin_params_changed() {
-    let (env, client, old_admin, _om) = setup();
-    let new_admin = Address::generate(&env);
- 
-    client.set_admin(&new_admin);
- 
-    let events = env.events().all();
-    let last = events.last().expect("no events");
- 
-    // Topic: ("call_registry", "admin_params_changed")
-    assert_eq!(
-        last.1,
-        soroban_sdk::vec![
-            &env,
-            "call_registry".into_val(&env),
-            "admin_params_changed".into_val(&env),
-        ]
-    );
- 
-    // First element of the payload tuple is the param discriminant
-    let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
-        last.2.into_val(&env);
- 
-    assert_eq!(param, Symbol::new(&env, "admin"));
-    assert_eq!(old_val, old_admin);
-    assert_eq!(new_val, new_admin);
-}
- 
-// ── set_outcome_manager ───────────────────────────────────────────────────────
- 
-#[test]
-fn test_set_outcome_manager_updates_config() {
-    let (env, client, _admin, _om) = setup();
-    let new_om = Address::generate(&env);
- 
-    client.set_outcome_manager(&new_om);
- 
-    assert_eq!(client.get_config().outcome_manager, new_om);
-}
- 
-#[test]
-fn test_set_outcome_manager_emits_admin_params_changed() {
-    let (env, client, _admin, old_om) = setup();
-    let new_om = Address::generate(&env);
- 
-    client.set_outcome_manager(&new_om);
- 
-    let events = env.events().all();
-    let last = events.last().expect("no events");
- 
-    let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
-        last.2.into_val(&env);
- 
-    assert_eq!(param, Symbol::new(&env, "outcome_manager"));
-    assert_eq!(old_val, old_om);
-    assert_eq!(new_val, new_om);
-}
- 
-// ── set_fee ───────────────────────────────────────────────────────────────────
- 
-#[test]
-fn test_set_fee_updates_config() {
-    let (_env, client, _admin, _om) = setup();
- 
-    client.set_fee(&250_u32); // 2.5 %
- 
-    assert_eq!(client.get_config().fee_bps, 250);
-}
- 
-#[test]
-fn test_set_fee_emits_admin_params_changed() {
-    let (env, client, _admin, _om) = setup();
- 
-    client.set_fee(&100_u32);
- 
-    let events = env.events().all();
-    let last = events.last().expect("no events");
- 
-    let (param, _changed_by, old_val, new_val): (Symbol, Address, u32, u32) =
-        last.2.into_val(&env);
- 
-    assert_eq!(param, Symbol::new(&env, "fee_bps"));
-    assert_eq!(old_val, 0_u32);   // default set in initialize()
-    assert_eq!(new_val, 100_u32);
-}
- 
-#[test]
-fn test_set_fee_zero_is_valid() {
-    let (_env, client, _admin, _om) = setup();
-    client.set_fee(&0_u32);
-    assert_eq!(client.get_config().fee_bps, 0);
-}
- 
-#[test]
-fn test_set_fee_max_boundary_is_valid() {
-    let (_env, client, _admin, _om) = setup();
-    client.set_fee(&10_000_u32); // exactly 100 % — allowed
-    assert_eq!(client.get_config().fee_bps, 10_000);
-}
- 
-#[test]
-#[should_panic(expected = "fee_bps cannot exceed 10_000 (100%)")]
-fn test_set_fee_above_max_panics() {
-    let (_env, client, _admin, _om) = setup();
-    client.set_fee(&10_001_u32);
-}
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let outcome_manager = Address::generate(&env);
+
+        client.initialize(&admin, &outcome_manager);
+
+        (env, client, admin, outcome_manager)
+    }
+
+    // ── set_admin ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_admin_updates_config() {
+        let (env, client, _admin, _om) = setup();
+        let new_admin = Address::generate(&env);
+
+        client.set_admin(&new_admin);
+
+        assert_eq!(client.get_config().admin, new_admin);
+    }
+
+    #[test]
+    fn test_set_admin_emits_admin_params_changed() {
+        let (env, client, old_admin, _om) = setup();
+        let new_admin = Address::generate(&env);
+
+        client.set_admin(&new_admin);
+
+        let events = env.events().all();
+        let last = events.last().expect("no events");
+
+        // Topic: ("call_registry", "admin_params_changed")
+        assert_eq!(
+            last.1,
+            soroban_sdk::vec![
+                &env,
+                "call_registry".into_val(&env),
+                "admin_params_changed".into_val(&env),
+            ]
+        );
+
+        // First element of the payload tuple is the param discriminant
+        let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
+            last.2.into_val(&env);
+
+        assert_eq!(param, Symbol::new(&env, "admin"));
+        assert_eq!(old_val, old_admin);
+        assert_eq!(new_val, new_admin);
+    }
+
+    // ── set_max_stake_per_user / stake cap ────────────────────────────────────────
+
+    #[test]
+    fn test_stake_within_cap_succeeds() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        client.set_max_stake_per_user(&100_000_000_i128);
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        // Exactly at the cap — should succeed
+        let updated = client.stake_on_call(&staker, &call.id, &100_000_000_i128, &1);
+        assert_eq!(updated.total_up_stake, 100_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Stake exceeds max_stake_per_user cap")]
+    fn test_stake_exceeding_cap_panics() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        client.set_max_stake_per_user(&50_000_000_i128);
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        client.stake_on_call(&staker, &call.id, &50_000_001_i128, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Stake exceeds max_stake_per_user cap")]
+    fn test_cumulative_stake_exceeding_cap_panics() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        client.set_max_stake_per_user(&60_000_000_i128);
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        client.stake_on_call(&staker, &call.id, &40_000_000_i128, &1); // 40M — ok
+        client.stake_on_call(&staker, &call.id, &21_000_000_i128, &1); // 61M total — panics
+    }
+
+    #[test]
+    fn test_cumulative_stake_at_cap_succeeds() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        client.set_max_stake_per_user(&60_000_000_i128);
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        client.stake_on_call(&staker, &call.id, &40_000_000_i128, &1);
+        let updated = client.stake_on_call(&staker, &call.id, &20_000_000_i128, &1); // exactly 60M
+        assert_eq!(updated.total_up_stake, 60_000_000);
+    }
+
+    #[test]
+    fn test_cap_zero_means_unlimited() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        // default cap is 0 (unlimited) — no set_max_stake_per_user call
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        // Very large stake — should not be blocked
+        let updated = client.stake_on_call(&staker, &call.id, &999_000_000_i128, &1);
+        assert_eq!(updated.total_up_stake, 999_000_000);
+    }
+
+    #[test]
+    fn test_updating_cap_affects_subsequent_stakes() {
+        let (env, admin, outcome_manager, creator) = create_test_env();
+        let staker = Address::generate(&env);
+        let contract_id = env.register_contract(None, CallRegistry);
+        let client = CallRegistryClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &outcome_manager);
+        client.set_max_stake_per_user(&200_000_000_i128);
+        env.ledger().set_timestamp(1000);
+
+        let stake_token = env.register_contract(None, MockToken);
+        let token_address = Address::generate(&env);
+        let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
+        let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
+
+        let call = create_call_with_default_condition(
+            &client,
+            &creator,
+            &stake_token,
+            &100_000_000_i128,
+            &2000u64,
+            &token_address,
+            &pair_id,
+            &ipfs_cid,
+        );
+
+        env.budget().reset_unlimited();
+        client.stake_on_call(&staker, &call.id, &100_000_000_i128, &1);
+
+        // Tighten cap below current stake
+        client.set_max_stake_per_user(&50_000_000_i128);
+
+        // Config updated — verify
+        assert_eq!(client.get_config().max_stake_per_user, 50_000_000);
+    }
+
+    #[test]
+    fn test_set_max_stake_per_user_emits_event() {
+        let (env, client, _admin, _om) = setup();
+
+        client.set_max_stake_per_user(&100_000_000_i128);
+
+        let events = env.events().all();
+        let last = events.last().expect("no events");
+
+        assert_eq!(
+            last.1,
+            soroban_sdk::vec![
+                &env,
+                "call_registry".into_val(&env),
+                "admin_params_changed".into_val(&env),
+            ]
+        );
+
+        let (param, _changed_by, old_val, new_val): (soroban_sdk::Symbol, Address, i128, i128) =
+            last.2.into_val(&env);
+
+        assert_eq!(param, soroban_sdk::Symbol::new(&env, "max_stake_per_user"));
+        assert_eq!(old_val, 0_i128);
+        assert_eq!(new_val, 100_000_000_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_stake_per_user cannot be negative")]
+    fn test_set_max_stake_negative_panics() {
+        let (_env, client, _admin, _om) = setup();
+        client.set_max_stake_per_user(&-1_i128);
+    }
+
+    // ── set_outcome_manager ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_outcome_manager_updates_config() {
+        let (env, client, _admin, _om) = setup();
+        let new_om = Address::generate(&env);
+
+        client.set_outcome_manager(&new_om);
+
+        assert_eq!(client.get_config().outcome_manager, new_om);
+    }
+
+    #[test]
+    fn test_set_outcome_manager_emits_admin_params_changed() {
+        let (env, client, _admin, old_om) = setup();
+        let new_om = Address::generate(&env);
+
+        client.set_outcome_manager(&new_om);
+
+        let events = env.events().all();
+        let last = events.last().expect("no events");
+
+        let (param, _changed_by, old_val, new_val): (Symbol, Address, Address, Address) =
+            last.2.into_val(&env);
+
+        assert_eq!(param, Symbol::new(&env, "outcome_manager"));
+        assert_eq!(old_val, old_om);
+        assert_eq!(new_val, new_om);
+    }
+
+    // ── set_fee ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_fee_updates_config() {
+        let (_env, client, _admin, _om) = setup();
+
+        client.set_fee(&250_u32); // 2.5 %
+
+        assert_eq!(client.get_config().fee_bps, 250);
+    }
+
+    #[test]
+    fn test_set_fee_emits_admin_params_changed() {
+        let (env, client, _admin, _om) = setup();
+
+        client.set_fee(&100_u32);
+
+        let events = env.events().all();
+        let last = events.last().expect("no events");
+
+        let (param, _changed_by, old_val, new_val): (Symbol, Address, u32, u32) =
+            last.2.into_val(&env);
+
+        assert_eq!(param, Symbol::new(&env, "fee_bps"));
+        assert_eq!(old_val, 0_u32); // default set in initialize()
+        assert_eq!(new_val, 100_u32);
+    }
+
+    #[test]
+    fn test_set_fee_zero_is_valid() {
+        let (_env, client, _admin, _om) = setup();
+        client.set_fee(&0_u32);
+        assert_eq!(client.get_config().fee_bps, 0);
+    }
+
+    #[test]
+    fn test_set_fee_max_boundary_is_valid() {
+        let (_env, client, _admin, _om) = setup();
+        client.set_fee(&10_000_u32); // exactly 100 % — allowed
+        assert_eq!(client.get_config().fee_bps, 10_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee_bps cannot exceed 10_000 (100%)")]
+    fn test_set_fee_above_max_panics() {
+        let (_env, client, _admin, _om) = setup();
+        client.set_fee(&10_001_u32);
+    }
 
     fn create_test_env() -> (Env, Address, Address, Address) {
         let env = Env::default();
@@ -229,7 +465,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -266,7 +503,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &-100_000_000_i128, // Invalid
@@ -292,7 +530,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -319,7 +558,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -356,7 +596,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -393,7 +634,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -426,7 +668,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -454,7 +697,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let created_call = create_call_with_default_condition(&client, 
+        let created_call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -502,7 +746,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -542,7 +787,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -578,7 +824,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -643,7 +890,8 @@ fn test_set_fee_above_max_panics() {
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
         // Create multiple calls
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -653,7 +901,8 @@ fn test_set_fee_above_max_panics() {
             &ipfs_cid,
         );
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -680,7 +929,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -689,7 +939,8 @@ fn test_set_fee_above_max_panics() {
             &pair_id,
             &ipfs_cid,
         );
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -698,7 +949,8 @@ fn test_set_fee_above_max_panics() {
             &pair_id,
             &ipfs_cid,
         );
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -730,7 +982,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator1,
             &stake_token,
             &100_000_000_i128,
@@ -739,7 +992,8 @@ fn test_set_fee_above_max_panics() {
             &pair_id,
             &ipfs_cid,
         );
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator2,
             &stake_token,
             &100_000_000_i128,
@@ -753,7 +1007,8 @@ fn test_set_fee_above_max_panics() {
             env.storage().instance().set(&DataKey::CallCounter, &4u64);
         });
 
-        let last_call = create_call_with_default_condition(&client, 
+        let last_call = create_call_with_default_condition(
+            &client,
             &creator1,
             &stake_token,
             &100_000_000_i128,
@@ -787,7 +1042,8 @@ fn test_set_fee_above_max_panics() {
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
         for _ in 0..25 {
-            create_call_with_default_condition(&client, 
+            create_call_with_default_condition(
+                &client,
                 &creator,
                 &stake_token,
                 &100_000_000_i128,
@@ -819,7 +1075,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator1,
             &stake_token,
             &100_000_000_i128,
@@ -828,7 +1085,8 @@ fn test_set_fee_above_max_panics() {
             &pair_id,
             &ipfs_cid,
         );
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator2,
             &stake_token,
             &100_000_000_i128,
@@ -837,7 +1095,8 @@ fn test_set_fee_above_max_panics() {
             &pair_id,
             &ipfs_cid,
         );
-        create_call_with_default_condition(&client, 
+        create_call_with_default_condition(
+            &client,
             &creator1,
             &stake_token,
             &100_000_000_i128,
@@ -871,7 +1130,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -911,7 +1171,8 @@ fn test_set_fee_above_max_panics() {
         let pair_id = Bytes::from_slice(&env, b"USDC/XLM");
         let ipfs_cid = Bytes::from_slice(&env, b"QmXxxx");
 
-        let call = create_call_with_default_condition(&client, 
+        let call = create_call_with_default_condition(
+            &client,
             &creator,
             &stake_token,
             &100_000_000_i128,
@@ -1013,26 +1274,14 @@ fn test_set_fee_above_max_panics() {
     fn test_evaluate_condition_percent_up() {
         let (_env, client, _admin, _om) = setup();
 
-        assert!(client.evaluate_condition(
-            &ConditionType::PercentUp(10_u32),
-            &100_i128,
-            &110_i128,
-        ));
-        assert!(client.evaluate_condition(
-            &ConditionType::PercentUp(10_u32),
-            &100_i128,
-            &111_i128,
-        ));
+        assert!(client.evaluate_condition(&ConditionType::PercentUp(10_u32), &100_i128, &110_i128,));
+        assert!(client.evaluate_condition(&ConditionType::PercentUp(10_u32), &100_i128, &111_i128,));
         assert!(!client.evaluate_condition(
             &ConditionType::PercentUp(10_u32),
             &100_i128,
             &109_i128,
         ));
-        assert!(!client.evaluate_condition(
-            &ConditionType::PercentUp(10_u32),
-            &0_i128,
-            &120_i128,
-        ));
+        assert!(!client.evaluate_condition(&ConditionType::PercentUp(10_u32), &0_i128, &120_i128,));
     }
 
     #[test]
@@ -1054,11 +1303,7 @@ fn test_set_fee_above_max_panics() {
             &100_i128,
             &91_i128,
         ));
-        assert!(!client.evaluate_condition(
-            &ConditionType::PercentDown(10_u32),
-            &0_i128,
-            &80_i128,
-        ));
+        assert!(!client.evaluate_condition(&ConditionType::PercentDown(10_u32), &0_i128, &80_i128,));
     }
 
     #[test]
