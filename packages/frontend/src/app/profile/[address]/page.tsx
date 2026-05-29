@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { StakeLedgerItem, UserStakesResponse, UserProfile } from '@/types'
 import { useWalletContext } from '@/components/WalletContext'
 import ProfileHeader from '@/components/ProfileHeader'
+import ProfileHeaderSkeleton from '@/components/skeletons/ProfileHeaderSkeleton'
 import ProfileStats from '@/components/ProfileStats'
 import ProfileTabs from '@/components/ProfileTabs'
 import { ProfileEditor } from '@/components/ProfileEditor'
@@ -443,11 +444,20 @@ export default function StakesPage() {
 
         {/* Profile Details Block */}
         {profileLoading ? (
-          <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 animate-pulse flex items-center space-x-4">
-            <div className="w-16 h-16 bg-gray-200 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <div className="h-5 bg-gray-200 rounded w-1/3" />
-              <div className="h-4 bg-gray-200 rounded w-1/2" />
+          <div className="space-y-6">
+            <ProfileHeaderSkeleton />
+            {/* Tabs Skeleton */}
+            <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 space-y-4">
+              <div className="flex space-x-4 border-b border-gray-200 pb-3">
+                <div className="h-4 w-24 rounded animate-shimmer" />
+                <div className="h-4 w-24 rounded animate-shimmer" />
+                <div className="h-4 w-24 rounded animate-shimmer" />
+              </div>
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl animate-shimmer" />
+                ))}
+              </div>
             </div>
           </div>
         ) : profileError || !profile ? (
